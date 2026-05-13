@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>This Day Then</title>
+    <meta
+      name="description"
+      content="A calm five-line journal where a warm AI friend helps you remember this date across years."
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar" aria-label="App header">
+        <div>
+          <p class="eyebrow">This Day Then</p>
+          <h1>A five-line journal for the same date across years.</h1>
+        </div>
+        <button class="icon-button" id="themeToggle" aria-label="Toggle soft dark mode" title="Theme">
+          <span aria-hidden="true">◐</span>
+        </button>
+      </header>
+
+      <section class="date-band" aria-labelledby="date-heading">
+        <div>
+          <p class="section-kicker">Selected date</p>
+          <h2 id="date-heading">Today</h2>
+        </div>
+        <label class="date-picker">
+          <span>Date</span>
+          <input id="dateInput" type="date" />
+        </label>
+      </section>
+
+      <nav class="tabs" aria-label="Main views">
+        <button class="tab is-active" data-view="checkin">Check-in</button>
+        <button class="tab" data-view="timeline">Five years</button>
+        <button class="tab" data-view="archive">Archive</button>
+      </nav>
+
+      <section class="view is-visible" id="checkinView" aria-labelledby="checkin-title">
+        <div class="conversation-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="section-kicker">Warm friend</p>
+              <h2 id="checkin-title">A few quiet lines about today</h2>
+            </div>
+            <button class="text-button" id="resetChat">Reset</button>
+          </div>
+
+          <div class="messages" id="messages" aria-live="polite"></div>
+
+          <form class="composer" id="composer">
+            <label for="messageInput" class="sr-only">Reply to your daily friend</label>
+            <textarea
+              id="messageInput"
+              rows="3"
+              placeholder="Write a little about what stayed with you..."
+            ></textarea>
+            <button class="primary-button" type="submit">Send</button>
+          </form>
+        </div>
+
+        <div class="summary-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="section-kicker">Five lines</p>
+              <h2>Today's memory</h2>
+            </div>
+            <button class="text-button" id="generateSummary">Draft</button>
+          </div>
+          <textarea id="summaryEditor" class="summary-editor" rows="8" placeholder="Your five-line summary will appear here."></textarea>
+          <div class="summary-actions">
+            <button class="secondary-button" id="regenerateSummary" type="button">Regenerate</button>
+            <button class="primary-button" id="saveSummary" type="button">Save five lines</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="timelineView" aria-labelledby="timeline-title">
+        <div class="timeline-heading">
+          <div>
+            <p class="section-kicker">Same date</p>
+            <h2 id="timeline-title">Five years together</h2>
+          </div>
+          <div class="heading-actions">
+            <button class="secondary-button compact" id="timelineSeedDemoData">Sample years</button>
+            <button class="primary-button compact" id="compareYears">Reflect</button>
+          </div>
+        </div>
+
+        <div class="year-stack" id="yearStack"></div>
+        <aside class="reflection" id="reflectionBox" hidden></aside>
+      </section>
+
+      <section class="view" id="archiveView" aria-labelledby="archive-title">
+        <div class="timeline-heading">
+          <div>
+            <p class="section-kicker">Archive</p>
+            <h2 id="archive-title">Saved days</h2>
+          </div>
+          <button class="secondary-button compact" id="seedDemoData">Add demo memories</button>
+        </div>
+        <div class="archive-list" id="archiveList"></div>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
