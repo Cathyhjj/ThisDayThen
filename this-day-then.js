@@ -774,66 +774,223 @@ function inferThemes(text) {
 function startBreathCanvas() {
   const canvas = elements.breathCanvas;
   const context = canvas.getContext("2d");
-  const particles = Array.from({ length: 58 }, (_, index) => ({
-    seed: index * 97,
-    radius: 1.2 + Math.random() * 2.2,
-    drift: 0.15 + Math.random() * 0.45,
-    phase: Math.random() * Math.PI * 2,
-    hue: Math.random(),
-  }));
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const mouse = {
+    targetX: 0,
+    targetY: 0,
+    currentX: 0,
+    currentY: 0,
+  };
+  const camera = { fov: 430 };
+  const dayPalette = ["#123527", "#2d7450", "#62ac70", "#8edfc0", "#e3fba8"];
+  const nightPalette = ["#07130e", "#143a28", "#2d7650", "#7fcf8e", "#c9ef92"];
+
+  let width = 0;
+  let height = 0;
+  let gridResolutionX = 0;
+  let gridResolutionZ = 0;
+  let particles = [];
+  let lines = [];
+
+  window.addEventListener("pointermove", (event) => {
+    mouse.targetX = (event.clientX - window.innerWidth / 2) / (window.innerWidth / 2);
+    mouse.targetY = -(event.clientY - window.innerHeight / 2) / (window.innerHeight / 2);
+  });
+
+  window.addEventListener("pointerleave", () => {
+    mouse.targetX = 0;
+    mouse.targetY = 0;
+  });
 
   function resize() {
     const ratio = window.devicePixelRatio || 1;
-    canvas.width = Math.floor(window.innerWidth * ratio);
-    canvas.height = Math.floor(window.innerHeight * ratio);
-    canvas.style.width = `${window.innerWidth}px`;
-    canvas.style.height = `${window.innerHeight}px`;
+    width = window.innerWidth;
+    height = window.innerHeight;
+    canvas.width = Math.floor(width * ratio);
+    canvas.height = Math.floor(height * ratio);
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    initWaveSurface();
   }
 
-  function draw(time) {
-    const width = window.innerWidth;
-    const height = window.innerHeight;
-    context.clearRect(0, 0, width, height);
+  function initWaveSurface() {
+    const isMobile = width <= 768;
+    gridResolutionX = isMobile ? 36 : 58;
+    gridResolutionZ = isMobile ? 34 : 50;
+    const spreadX = isMobile ? 35 : 45;
+    const spreadZ = isMobile ? 34 : 43;
+    const grid = [];
+    particles = [];
+    lines = [];
 
+    for (let x = 0; x < gridResolutionX; x += 1) {
+      const row = [];
+      for (let z = 0; z < gridResolutionZ; z += 1) {
+        const particle = createWaveParticle(x, z, spreadX, spreadZ);
+        particles.push(particle);
+        row.push(particle);
+      }
+      grid.push(row);
+    }
+
+    for (let x = 0; x < gridResolutionX; x += 1) {
+      for (let z = 0; z < gridResolutionZ; z += 1) {
+        if (x < gridResolutionX - 1) lines.push([grid[x][z], grid[x + 1][z]]);
+        if (z < gridResolutionZ - 1) lines.push([grid[x][z], grid[x][z + 1]]);
+      }
+    }
+  }
+
+  function createWaveParticle(gridX, gridZ, spreadX, spreadZ) {
+    return {
+      i: gridX,
+      j: gridZ,
+      baseX: (gridX - gridResolutionX / 2) * spreadX,
+      baseZ: (gridZ - gridResolutionZ / 2) * spreadZ,
+      noise: Math.sin(gridX * 1.73) * Math.cos(gridZ * 1.37) * 0.22,
+      size: 0.8 + ((gridX * 7 + gridZ * 13) % 10) * 0.18,
+      x2d: 0,
+      y2d: 0,
+      scale: 0,
+      colorValue: 0,
+      alpha: 0,
+      distance: 0,
+    };
+  }
+
+  function hexToRgb(hex) {
+    return {
+      r: parseInt(hex.slice(1, 3), 16),
+      g: parseInt(hex.slice(3, 5), 16),
+      b: parseInt(hex.slice(5, 7), 16),
+    };
+  }
+
+  function waveColor(value, alpha, nightMode) {
+    const palette = nightMode ? nightPalette : dayPalette;
+    const safeValue = Math.max(0, Math.min(1, value));
+    const position = safeValue * (palette.length - 1);
+    const lowIndex = Math.floor(position);
+    const highIndex = Math.min(palette.length - 1, lowIndex + 1);
+    const mix = position - lowIndex;
+    const low = hexToRgb(palette[lowIndex]);
+    const high = hexToRgb(palette[highIndex]);
+    const r = Math.round(low.r + (high.r - low.r) * mix);
+    const g = Math.round(low.g + (high.g - low.g) * mix);
+    const b = Math.round(low.b + (high.b - low.b) * mix);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+
+  function updateWaveParticle(particle, time) {
+    const rippleCenterX = mouse.currentX * 520;
+    const rippleCenterZ = mouse.currentY * 420;
+    const dx = particle.baseX - rippleCenterX;
+    const dz = particle.baseZ - rippleCenterZ;
+    const distance = Math.sqrt(dx * dx + dz * dz);
+    const stretchedDistance = Math.pow(distance, 0.93) * 1.48;
+    const decay = Math.max(0, 1 - Math.pow(distance / 1540, 1.48));
+    const amplitude = width <= 768 ? 150 : 230;
+    const breathingWave = Math.sin(stretchedDistance * 0.0082 - time * 0.00145 + particle.noise);
+    const crossWave = Math.sin(particle.baseX * 0.006 + time * 0.00062) * 0.28;
+    const y3d = (breathingWave + crossWave) * amplitude * decay;
+
+    const rotX = 1.05 + mouse.currentY * 0.18;
+    const rotY = mouse.currentX * 0.18;
+    const y1 = y3d * Math.cos(rotX) - particle.baseZ * Math.sin(rotX);
+    const z1 = y3d * Math.sin(rotX) + particle.baseZ * Math.cos(rotX);
+    const x2 = particle.baseX * Math.cos(rotY) + z1 * Math.sin(rotY);
+    const z2 = -particle.baseX * Math.sin(rotY) + z1 * Math.cos(rotY);
+    const finalZ = z2 + (width <= 768 ? 680 : 780);
+    const scale = camera.fov / (camera.fov + finalZ);
+    const heightOffset = width <= 768 ? height * 0.46 : height * 0.44;
+
+    particle.x2d = x2 * scale + width / 2;
+    particle.y2d = y1 * scale + heightOffset;
+    particle.scale = scale;
+    particle.distance = distance;
+    particle.alpha = Math.max(0, Math.min(0.82, scale * 1.8 * decay));
+    particle.colorValue = Math.max(0, Math.min(1, ((y3d + amplitude) / (amplitude * 2)) * (0.34 + decay * 0.66)));
+  }
+
+  function drawAmbientGlow(time, nightMode) {
     const breath = (Math.sin(time / 4200) + 1) / 2;
-    const gradient = context.createRadialGradient(
+    const centerGlow = context.createRadialGradient(
       width * 0.5,
-      height * 0.22,
-      10,
+      height * 0.34,
+      0,
       width * 0.5,
-      height * 0.25,
-      width * (0.55 + breath * 0.08)
+      height * 0.36,
+      width * (0.34 + breath * 0.08)
     );
-    gradient.addColorStop(0, `rgba(207, 232, 201, ${0.18 + breath * 0.08})`);
-    gradient.addColorStop(0.55, "rgba(158, 207, 192, 0.08)");
-    gradient.addColorStop(1, "rgba(247, 251, 243, 0)");
-    context.fillStyle = gradient;
+    centerGlow.addColorStop(0, nightMode ? "rgba(129, 196, 137, 0.16)" : "rgba(227, 251, 168, 0.22)");
+    centerGlow.addColorStop(0.5, nightMode ? "rgba(114, 202, 187, 0.08)" : "rgba(134, 207, 192, 0.16)");
+    centerGlow.addColorStop(1, "rgba(255, 255, 255, 0)");
+    context.fillStyle = centerGlow;
     context.fillRect(0, 0, width, height);
 
-    particles.forEach((particle, index) => {
-      const x =
-        ((particle.seed * 37 + time * particle.drift * 0.018) % (width + 120)) - 60;
-      const y =
-        height * (0.08 + ((particle.seed * 13) % 90) / 100) +
-        Math.sin(time / 2800 + particle.phase) * 18;
-      const alpha = 0.14 + Math.sin(time / 2200 + index) * 0.05;
+    const horizon = context.createLinearGradient(0, height * 0.1, width, height * 0.82);
+    horizon.addColorStop(0, nightMode ? "rgba(201, 239, 146, 0.025)" : "rgba(227, 251, 168, 0.08)");
+    horizon.addColorStop(0.46, nightMode ? "rgba(114, 202, 187, 0.08)" : "rgba(134, 207, 192, 0.11)");
+    horizon.addColorStop(1, "rgba(255, 255, 255, 0)");
+    context.fillStyle = horizon;
+    context.fillRect(0, 0, width, height);
+  }
+
+  function draw(time = 0) {
+    const nightMode = document.documentElement.dataset.theme === "night";
+    context.clearRect(0, 0, width, height);
+    drawAmbientGlow(time, nightMode);
+
+    mouse.currentX += (mouse.targetX - mouse.currentX) * 0.035;
+    mouse.currentY += (mouse.targetY - mouse.currentY) * 0.035;
+    particles.forEach((particle) => updateWaveParticle(particle, time));
+
+    context.save();
+    context.lineCap = "round";
+    lines.forEach(([first, second]) => {
+      if (first.alpha <= 0 || second.alpha <= 0) return;
+      const dx = first.x2d - second.x2d;
+      const dy = first.y2d - second.y2d;
+      const distanceSquared = dx * dx + dy * dy;
+      if (distanceSquared > 38000) return;
+
+      const averageValue = (first.colorValue + second.colorValue) / 2;
+      const lineAlpha = Math.min(first.alpha, second.alpha) * (0.18 + averageValue * 0.58);
+      if (lineAlpha < 0.018) return;
+
+      const gradient = context.createLinearGradient(first.x2d, first.y2d, second.x2d, second.y2d);
+      gradient.addColorStop(0, waveColor(first.colorValue, lineAlpha, nightMode));
+      gradient.addColorStop(1, waveColor(second.colorValue, lineAlpha * 0.92, nightMode));
 
       context.beginPath();
-      context.arc(x, y, particle.radius + breath * 0.9, 0, Math.PI * 2);
-      context.fillStyle =
-        particle.hue > 0.55
-          ? `rgba(91, 143, 99, ${alpha})`
-          : `rgba(122, 174, 157, ${alpha})`;
+      context.moveTo(first.x2d, first.y2d);
+      context.quadraticCurveTo(
+        (first.x2d + second.x2d) / 2,
+        (first.y2d + second.y2d) / 2 + 28 * Math.min(first.scale, second.scale),
+        second.x2d,
+        second.y2d
+      );
+      context.lineWidth = 0.55 + Math.min(first.scale, second.scale) * (1 + averageValue * 2.6);
+      context.strokeStyle = gradient;
+      context.stroke();
+    });
+    context.restore();
+
+    particles.forEach((particle) => {
+      if (particle.alpha < 0.04) return;
+      context.beginPath();
+      context.arc(particle.x2d, particle.y2d, particle.size * particle.scale, 0, Math.PI * 2);
+      context.fillStyle = waveColor(particle.colorValue, particle.alpha * 0.82, nightMode);
       context.fill();
     });
 
-    requestAnimationFrame(draw);
+    if (!reduceMotion) requestAnimationFrame(draw);
   }
 
   resize();
   window.addEventListener("resize", resize);
-  requestAnimationFrame(draw);
+  draw();
 }
 
 function loadEntries() {
