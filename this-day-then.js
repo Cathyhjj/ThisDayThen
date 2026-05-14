@@ -15,6 +15,7 @@ const state = {
     recognition: null,
     mode: "browser-demo",
     transcriptVisible: false,
+    realtime: null,
   },
 };
 
@@ -261,6 +262,11 @@ async function checkVoiceMode() {
 
 function startVoiceSession() {
   if (state.voice.active) return;
+  if (state.voice.mode === "openai-realtime") {
+    startRealtimeVoiceSession();
+    return;
+  }
+
   state.voice.active = true;
   updateVoiceUI("speaking", "She is beginning softly");
   speakBot(nextPromptText());
@@ -283,6 +289,7 @@ function stopVoiceSession() {
     state.voice.recognition.stop();
     state.voice.recognition = null;
   }
+  stopRealtimeVoiceSession();
 }
 
 function speakBot(text) {
@@ -393,9 +400,152 @@ function acceptUserVoiceText(text) {
 }
 
 function pushMessage(role, text) {
+  if (!text) return;
   currentChat().push({ role, text, at: new Date().toISOString() });
   persistChat();
   renderMessages();
+}
+
+async function startRealtimeVoiceSession() {
+  if (!window.RTCPeerConnection || !navigator.mediaDevices?.getUserMedia) {
+    state.voice.mode = "browser-demo";
+    startVoiceSession();
+    return;
+  }
+
+  state.voice.active = true;
+  updateVoiceUI("thinking", "Opening the quiet room", "Your browser may ask for microphone access.");
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
+    const peerConnection = new RTCPeerConnection();
+    const audio = document.createElement("audio");
+    audio.autoplay = true;
+    audio.setAttribute("playsinline", "true");
+
+    peerConnection.ontrack = (event) => {
+      audio.srcObject = event.streams[0];
+    };
+
+    stream.getAudioTracks().forEach((track) => {
+      peerConnection.addTrack(track, stream);
+    });
+
+    const dataChannel = peerConnection.createDataChannel("oai-events");
+    const transcriptDrafts = new Map();
+
+    dataChannel.addEventListener("open", () => {
+      state.voice.realtime = { peerConnection, dataChannel, stream, audio, transcriptDrafts };
+      updateVoiceUI("speaking", "She is beginning softly");
+      sendRealtimeEvent({
+        type: "response.create",
+        response: {
+          modalities: ["audio", "text"],
+          instructions: "Begin with one short, soft question: I'm here. What stayed with you from today?",
+        },
+      });
+    });
+
+    dataChannel.addEventListener("message", (event) => {
+      handleRealtimeEvent(event.data, transcriptDrafts);
+    });
+
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+
+    const response = await fetch("/api/realtime-session", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/sdp",
+      },
+      body: offer.sdp,
+    });
+
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+
+    const answerSdp = await response.text();
+    await peerConnection.setRemoteDescription({
+      type: "answer",
+      sdp: answerSdp,
+    });
+  } catch (error) {
+    console.warn("Realtime voice failed, falling back to browser voice.", error);
+    stopVoiceSession();
+    state.voice.mode = "browser-demo";
+    updateVoiceUI("idle", "Realtime voice is not ready", "Using the browser demo voice for now.");
+  }
+}
+
+function stopRealtimeVoiceSession() {
+  const realtime = state.voice.realtime;
+  if (!realtime) return;
+
+  realtime.dataChannel?.close();
+  realtime.peerConnection?.close();
+  realtime.stream?.getTracks().forEach((track) => track.stop());
+  realtime.audio?.remove();
+  state.voice.realtime = null;
+}
+
+function sendRealtimeEvent(event) {
+  const dataChannel = state.voice.realtime?.dataChannel;
+  if (!dataChannel || dataChannel.readyState !== "open") return;
+  dataChannel.send(JSON.stringify(event));
+}
+
+function handleRealtimeEvent(rawEvent, transcriptDrafts) {
+  let event;
+  try {
+    event = JSON.parse(rawEvent);
+  } catch {
+    return;
+  }
+
+  if (event.type === "input_audio_buffer.speech_started") {
+    updateVoiceUI("listening", "Listening");
+    return;
+  }
+
+  if (event.type === "input_audio_buffer.speech_stopped") {
+    updateVoiceUI("thinking", "Letting that settle");
+    return;
+  }
+
+  if (event.type === "response.audio.delta" || event.type === "response.output_audio.delta") {
+    updateVoiceUI("speaking", "She is speaking");
+    return;
+  }
+
+  if (event.type === "response.done" || event.type === "response.audio.done") {
+    updateVoiceUI("listening", "Listening");
+    return;
+  }
+
+  if (event.type === "conversation.item.input_audio_transcription.completed" && event.transcript) {
+    pushMessage("user", event.transcript.trim());
+    return;
+  }
+
+  if (event.type === "response.audio_transcript.delta" || event.type === "response.output_audio_transcript.delta") {
+    const key = event.response_id || event.item_id || "assistant";
+    transcriptDrafts.set(key, `${transcriptDrafts.get(key) || ""}${event.delta || ""}`);
+    return;
+  }
+
+  if (event.type === "response.audio_transcript.done" || event.type === "response.output_audio_transcript.done") {
+    const key = event.response_id || event.item_id || "assistant";
+    const text = event.transcript || transcriptDrafts.get(key) || "";
+    transcriptDrafts.delete(key);
+    pushMessage("bot", text.trim());
+  }
 }
 
 function nextPromptText() {

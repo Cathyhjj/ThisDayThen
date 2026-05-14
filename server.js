@@ -64,6 +64,17 @@ async function handleRealtimeSession(req, res) {
     instructions:
       "You are the warm, calm voice companion for This Day Then. Speak briefly, softly, and ask one gentle question at a time. Help the user notice ordinary details from today. Avoid therapy, diagnosis, pressure, and long explanations.",
     audio: {
+      input: {
+        transcription: {
+          model: process.env.OPENAI_TRANSCRIPTION_MODEL || "gpt-4o-mini-transcribe",
+        },
+        turn_detection: {
+          type: "server_vad",
+          threshold: 0.5,
+          prefix_padding_ms: 300,
+          silence_duration_ms: 850,
+        },
+      },
       output: {
         voice: process.env.OPENAI_REALTIME_VOICE || "marin",
       },
