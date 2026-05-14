@@ -31,7 +31,7 @@
   --stage-radius: 30px;
   --pill: 999px;
   font-family:
-    ui-rounded, "SF Pro Rounded", "Google Sans", "Google Sans Text", Inter, Roboto, Arial, sans-serif;
+    "Instrument Sans", "Avenir Next", "Helvetica Neue", Arial, sans-serif;
 }
 
 :root[data-theme="night"] {
@@ -154,65 +154,6 @@ textarea:focus-visible {
   opacity: 0.95;
 }
 
-.ambient-vectors {
-  position: fixed;
-  inset: 0;
-  z-index: -2;
-  pointer-events: none;
-  overflow: hidden;
-}
-
-.botanical-veil {
-  position: absolute;
-  width: min(46vw, 520px);
-  height: auto;
-  opacity: 0.16;
-  filter: drop-shadow(0 32px 70px rgba(39, 84, 61, 0.12));
-}
-
-.veil-left {
-  top: 88px;
-  left: -150px;
-  animation: veilFloat 18s ease-in-out infinite;
-}
-
-.veil-right {
-  right: -170px;
-  bottom: 70px;
-  animation: veilFloat 22s ease-in-out infinite reverse;
-}
-
-.contour,
-.stem {
-  fill: none;
-  stroke: rgba(40, 90, 60, 0.34);
-  stroke-width: 3;
-  stroke-linecap: round;
-}
-
-.contour.thin {
-  stroke-width: 1.4;
-  opacity: 0.6;
-}
-
-.stem {
-  stroke: rgba(40, 90, 60, 0.45);
-}
-
-.leaf {
-  fill: rgba(142, 197, 121, 0.32);
-  stroke: rgba(40, 90, 60, 0.24);
-  stroke-width: 1.5;
-}
-
-.leaf-two {
-  fill: rgba(134, 207, 192, 0.28);
-}
-
-.leaf-three {
-  fill: rgba(227, 251, 168, 0.3);
-}
-
 .app-shell {
   position: relative;
   z-index: 1;
@@ -227,9 +168,9 @@ textarea:focus-visible {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 18px;
-  min-height: 270px;
-  margin: 0 0 18px;
-  padding: clamp(24px, 5vw, 56px);
+  min-height: 176px;
+  margin: 0 0 14px;
+  padding: clamp(22px, 4vw, 42px);
   overflow: hidden;
   border-radius: 18px;
   background:
@@ -271,7 +212,7 @@ textarea:focus-visible {
 }
 
 .topbar-copy {
-  max-width: 760px;
+  max-width: 850px;
   align-self: end;
 }
 
@@ -293,9 +234,10 @@ p {
 
 h1 {
   margin-bottom: 0;
-  font-size: clamp(4.2rem, 15vw, 11rem);
-  font-weight: 520;
-  line-height: 0.84;
+  font-family: "Space Grotesk", "Instrument Sans", "Avenir Next", sans-serif;
+  font-size: clamp(3.2rem, 9.5vw, 7.8rem);
+  font-weight: 600;
+  line-height: 0.9;
   letter-spacing: 0;
   background: var(--text-gradient);
   -webkit-background-clip: text;
@@ -313,87 +255,6 @@ h2 {
   font-weight: 720;
   line-height: 1.18;
   letter-spacing: 0;
-}
-
-.topbar-art {
-  position: absolute;
-  right: clamp(18px, 6vw, 74px);
-  bottom: 16px;
-  width: min(36vw, 320px);
-  min-width: 230px;
-  aspect-ratio: 1.16;
-  opacity: 0.28;
-}
-
-.journal-plant {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  animation: plantSway 10s ease-in-out infinite;
-}
-
-.art-page {
-  fill: rgba(255, 253, 243, 0.72);
-  stroke: rgba(40, 90, 60, 0.14);
-  stroke-width: 2;
-}
-
-.art-page.back {
-  fill: rgba(210, 239, 218, 0.5);
-}
-
-.art-line {
-  fill: none;
-  stroke: rgba(40, 90, 60, 0.24);
-  stroke-width: 6;
-  stroke-linecap: round;
-}
-
-.art-line.short {
-  stroke: rgba(134, 207, 192, 0.34);
-}
-
-.art-stem {
-  fill: none;
-  stroke: rgba(40, 90, 60, 0.5);
-  stroke-width: 4;
-  stroke-linecap: round;
-}
-
-.art-leaf {
-  fill: rgba(118, 168, 111, 0.52);
-}
-
-.art-leaf.alt {
-  fill: rgba(134, 207, 192, 0.48);
-}
-
-.material-slip {
-  position: absolute;
-  width: 48px;
-  height: 74px;
-  border-radius: 5px;
-  background:
-    linear-gradient(180deg, rgba(255, 253, 243, 0.9), rgba(255, 248, 223, 0.58)),
-    repeating-linear-gradient(180deg, transparent 0 16px, rgba(40, 90, 60, 0.14) 16px 17px);
-  box-shadow: 0 18px 34px rgba(33, 77, 54, 0.14);
-}
-
-.slip-one {
-  top: 20px;
-  right: 14px;
-  transform: rotate(12deg);
-  animation: slipFloat 8s ease-in-out infinite;
-}
-
-.slip-two {
-  right: 92px;
-  bottom: 22px;
-  width: 38px;
-  height: 58px;
-  transform: rotate(-17deg);
-  animation: slipFloat 9s ease-in-out infinite reverse;
 }
 
 .icon-button {
@@ -626,98 +487,6 @@ h2 {
   background:
     linear-gradient(145deg, rgba(20, 54, 34, 0.82), rgba(20, 82, 60, 0.28) 52%, rgba(76, 72, 134, 0.14)),
     linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
-}
-
-.stage-materials,
-.ripple-map {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.stage-materials {
-  z-index: -1;
-}
-
-.ripple-map {
-  width: 100%;
-  height: 100%;
-  opacity: 0.56;
-  animation: rippleTravel 14s ease-in-out infinite;
-}
-
-.ripple-map path {
-  fill: none;
-  stroke: rgba(40, 90, 60, 0.17);
-  stroke-width: 2.2;
-  stroke-linecap: round;
-}
-
-:root[data-theme="night"] .ripple-map path {
-  stroke: rgba(196, 245, 202, 0.15);
-}
-
-.pressed-leaf {
-  position: absolute;
-  width: 78px;
-  height: 132px;
-  border-radius: 100% 0 100% 0;
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.3), transparent 48%),
-    linear-gradient(145deg, rgba(118, 168, 111, 0.38), rgba(134, 207, 192, 0.16));
-  box-shadow: inset 1px 0 rgba(40, 90, 60, 0.08);
-  transform-origin: 50% 85%;
-}
-
-.pressed-leaf::after {
-  position: absolute;
-  inset: 10px 50% 12px auto;
-  width: 1px;
-  background: rgba(40, 90, 60, 0.18);
-  content: "";
-}
-
-.leaf-a {
-  top: 30px;
-  left: 8%;
-  transform: rotate(-34deg);
-  animation: leafFloat 10s ease-in-out infinite;
-}
-
-.leaf-b {
-  right: 10%;
-  bottom: 36px;
-  width: 62px;
-  height: 102px;
-  transform: rotate(42deg);
-  animation: leafFloat 12s ease-in-out infinite reverse;
-}
-
-.memory-slip {
-  position: absolute;
-  width: 54px;
-  height: 74px;
-  border-radius: 5px;
-  background:
-    linear-gradient(180deg, rgba(255, 253, 243, 0.68), rgba(255, 248, 223, 0.22)),
-    repeating-linear-gradient(180deg, transparent 0 14px, rgba(40, 90, 60, 0.1) 14px 15px);
-  box-shadow: 0 16px 34px rgba(33, 77, 54, 0.1);
-}
-
-.stage-slip-a {
-  left: 18%;
-  bottom: 46px;
-  transform: rotate(13deg);
-  animation: paperDrift 11s ease-in-out infinite;
-}
-
-.stage-slip-b {
-  top: 42px;
-  right: 19%;
-  width: 42px;
-  height: 58px;
-  transform: rotate(-16deg);
-  animation: paperDrift 12s ease-in-out infinite reverse;
 }
 
 .voice-stage::before,
@@ -1147,74 +916,6 @@ h2 {
   border: 0;
 }
 
-@keyframes veilFloat {
-  0%,
-  100% {
-    transform: translate3d(0, 0, 0) rotate(-2deg);
-  }
-
-  50% {
-    transform: translate3d(20px, -18px, 0) rotate(3deg);
-  }
-}
-
-@keyframes plantSway {
-  0%,
-  100% {
-    transform: rotate(-2deg) translateY(0);
-  }
-
-  50% {
-    transform: rotate(2deg) translateY(-7px);
-  }
-}
-
-@keyframes slipFloat {
-  0%,
-  100% {
-    translate: 0 0;
-  }
-
-  50% {
-    translate: 0 -12px;
-  }
-}
-
-@keyframes rippleTravel {
-  0%,
-  100% {
-    transform: translateX(-10px) scale(1);
-    opacity: 0.42;
-  }
-
-  50% {
-    transform: translateX(12px) scale(1.025);
-    opacity: 0.66;
-  }
-}
-
-@keyframes leafFloat {
-  0%,
-  100% {
-    translate: 0 0;
-  }
-
-  50% {
-    translate: 0 -14px;
-  }
-}
-
-@keyframes paperDrift {
-  0%,
-  100% {
-    translate: 0 0;
-  }
-
-  50% {
-    translate: 8px -9px;
-  }
-}
-
 @keyframes breathe {
   0%,
   100% {
@@ -1285,9 +986,9 @@ h2 {
   }
 
   .topbar {
-    grid-template-columns: minmax(0, 0.72fr) minmax(240px, 0.28fr);
+    grid-template-columns: minmax(0, 1fr);
     align-items: end;
-    min-height: 410px;
+    min-height: 220px;
   }
 
   .date-band {
@@ -1323,32 +1024,13 @@ h2 {
 
 @media (min-width: 1120px) {
   .topbar {
-    min-height: 460px;
-  }
-}
-
-@media (max-width: 780px) {
-  .topbar-art {
-    right: 4px;
-    bottom: 4px;
-    width: 250px;
-    opacity: 0.5;
-  }
-
-  .botanical-veil {
-    width: 520px;
-    opacity: 0.24;
+    min-height: 232px;
   }
 }
 
 @media (max-width: 640px) {
   .topbar {
-    min-height: 360px;
-  }
-
-  .topbar-art {
-    width: 220px;
-    min-width: 0;
+    min-height: 170px;
   }
 
   .voice-orb {
@@ -1385,12 +1067,12 @@ h2 {
   }
 
   .topbar {
-    min-height: 330px;
-    padding: 22px;
+    min-height: 154px;
+    padding: 20px;
   }
 
   h1 {
-    font-size: 2.3rem;
+    font-size: 2.8rem;
   }
 
   .tab,

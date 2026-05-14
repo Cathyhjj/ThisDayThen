@@ -8,48 +8,21 @@
       name="description"
       content="A calm five-line journal where a warm AI friend helps you remember this date across years."
     />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <canvas id="breathCanvas" class="breath-canvas" aria-hidden="true"></canvas>
-    <div class="ambient-vectors" aria-hidden="true">
-      <svg class="botanical-veil veil-left" viewBox="0 0 420 620" role="img">
-        <path class="contour" d="M82 522C38 443 45 349 94 265C142 181 226 105 330 61" />
-        <path class="contour thin" d="M54 472C85 392 142 322 226 262C292 214 342 163 374 108" />
-        <path class="contour thin" d="M126 574C122 460 166 360 258 275C319 219 358 155 372 82" />
-        <path class="stem" d="M146 544C210 421 250 310 267 212C276 160 296 111 328 65" />
-        <path class="leaf" d="M245 278C182 256 143 205 130 126C206 136 252 182 267 264C260 272 253 277 245 278Z" />
-        <path class="leaf leaf-two" d="M194 392C129 379 83 334 58 258C135 257 187 296 213 376C209 384 203 389 194 392Z" />
-        <path class="leaf leaf-three" d="M292 188C252 156 238 106 251 37C309 66 335 112 323 178C314 184 304 188 292 188Z" />
-      </svg>
-
-      <svg class="botanical-veil veil-right" viewBox="0 0 520 560" role="img">
-        <path class="contour" d="M432 76C478 159 471 254 414 337C355 424 259 483 132 512" />
-        <path class="contour thin" d="M464 139C386 152 317 189 257 249C200 306 134 340 58 350" />
-        <path class="stem" d="M420 86C345 194 298 284 279 358C266 406 233 454 180 501" />
-        <path class="leaf" d="M279 355C343 344 394 379 434 460C356 470 301 443 269 378C270 369 273 362 279 355Z" />
-        <path class="leaf leaf-two" d="M326 251C389 236 440 263 480 334C407 351 352 330 315 274C316 264 319 257 326 251Z" />
-      </svg>
-    </div>
     <main class="app-shell">
       <header class="topbar" aria-label="App header">
         <div class="topbar-copy">
           <p class="eyebrow">This Day Then</p>
           <h1>This day, then</h1>
-        </div>
-        <div class="topbar-art" aria-hidden="true">
-          <svg class="journal-plant" viewBox="0 0 280 240">
-            <path class="art-page back" d="M58 72L194 48C212 45 228 58 231 76L246 163C249 181 237 197 219 200L83 224C65 227 49 215 46 197L31 110C28 92 40 76 58 72Z" />
-            <path class="art-page front" d="M75 46L211 70C229 73 241 90 238 108L223 195C220 213 203 225 185 222L49 198C31 195 19 178 22 160L37 73C40 55 57 43 75 46Z" />
-            <path class="art-line" d="M72 94L175 112" />
-            <path class="art-line short" d="M66 129L191 151" />
-            <path class="art-line" d="M61 163L152 179" />
-            <path class="art-stem" d="M148 202C166 153 164 111 141 78" />
-            <path class="art-leaf" d="M151 152C116 144 96 119 91 78C131 86 154 110 162 149C159 151 155 153 151 152Z" />
-            <path class="art-leaf alt" d="M162 119C189 105 211 110 231 134C202 150 178 148 160 127C159 124 160 121 162 119Z" />
-          </svg>
-          <span class="material-slip slip-one"></span>
-          <span class="material-slip slip-two"></span>
         </div>
         <button class="icon-button" id="themeToggle" aria-label="Toggle deep forest mode" title="Theme">
           <span class="theme-mark" aria-hidden="true"></span>
@@ -84,18 +57,6 @@
           </div>
 
           <div class="voice-stage" data-voice-state="idle">
-            <div class="stage-materials" aria-hidden="true">
-              <svg class="ripple-map" viewBox="0 0 520 360">
-                <path d="M36 188C92 121 170 89 270 92C365 95 439 132 484 204" />
-                <path d="M72 223C127 170 194 146 273 151C350 155 411 184 456 239" />
-                <path d="M98 154C151 124 214 110 286 116C352 121 405 144 446 185" />
-                <path d="M132 259C183 236 235 228 289 235C341 242 384 263 418 298" />
-              </svg>
-              <span class="pressed-leaf leaf-a"></span>
-              <span class="pressed-leaf leaf-b"></span>
-              <span class="memory-slip stage-slip-a"></span>
-              <span class="memory-slip stage-slip-b"></span>
-            </div>
             <button class="voice-orb" id="voiceOrb" type="button" aria-label="Start live audio check-in">
               <span class="orb-ring ring-one"></span>
               <span class="orb-ring ring-two"></span>

@@ -791,6 +791,7 @@ function startBreathCanvas() {
   let gridResolutionZ = 0;
   let particles = [];
   let lines = [];
+  let lastFrameTime = 0;
 
   window.addEventListener("pointermove", (event) => {
     mouse.targetX = (event.clientX - window.innerWidth / 2) / (window.innerWidth / 2);
@@ -816,10 +817,10 @@ function startBreathCanvas() {
 
   function initWaveSurface() {
     const isMobile = width <= 768;
-    gridResolutionX = isMobile ? 36 : 58;
-    gridResolutionZ = isMobile ? 34 : 50;
-    const spreadX = isMobile ? 35 : 45;
-    const spreadZ = isMobile ? 34 : 43;
+    gridResolutionX = isMobile ? 28 : 48;
+    gridResolutionZ = isMobile ? 26 : 38;
+    const spreadX = isMobile ? 42 : 52;
+    const spreadZ = isMobile ? 40 : 50;
     const grid = [];
     particles = [];
     lines = [];
@@ -938,6 +939,12 @@ function startBreathCanvas() {
   }
 
   function draw(time = 0) {
+    if (!reduceMotion && time - lastFrameTime < 30) {
+      requestAnimationFrame(draw);
+      return;
+    }
+
+    lastFrameTime = time;
     const nightMode = document.documentElement.dataset.theme === "night";
     context.clearRect(0, 0, width, height);
     drawAmbientGlow(time, nightMode);
