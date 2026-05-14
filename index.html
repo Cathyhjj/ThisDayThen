@@ -11,14 +11,15 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
+    <canvas id="breathCanvas" class="breath-canvas" aria-hidden="true"></canvas>
     <main class="app-shell">
       <header class="topbar" aria-label="App header">
         <div>
           <p class="eyebrow">This Day Then</p>
-          <h1>A five-line journal for the same date across years.</h1>
+          <h1>Speak softly with today, then keep five lines for future-you.</h1>
         </div>
-        <button class="icon-button" id="themeToggle" aria-label="Toggle soft dark mode" title="Theme">
-          <span aria-hidden="true">◐</span>
+        <button class="icon-button" id="themeToggle" aria-label="Toggle deep forest mode" title="Theme">
+          <span class="theme-mark" aria-hidden="true"></span>
         </button>
       </header>
 
@@ -40,25 +41,54 @@
       </nav>
 
       <section class="view is-visible" id="checkinView" aria-labelledby="checkin-title">
-        <div class="conversation-panel">
+        <div class="conversation-panel audio-panel">
           <div class="panel-heading">
             <div>
-              <p class="section-kicker">Warm friend</p>
-              <h2 id="checkin-title">A few quiet lines about today</h2>
+              <p class="section-kicker">Live voice</p>
+              <h2 id="checkin-title">A quiet conversation</h2>
             </div>
-            <button class="text-button" id="resetChat">Reset</button>
+            <button class="text-button" id="resetChat">Begin again</button>
           </div>
 
-          <div class="messages" id="messages" aria-live="polite"></div>
+          <div class="voice-stage" data-voice-state="idle">
+            <button class="voice-orb" id="voiceOrb" type="button" aria-label="Start live audio check-in">
+              <span class="orb-ring ring-one"></span>
+              <span class="orb-ring ring-two"></span>
+              <span class="orb-ring ring-three"></span>
+              <span class="orb-core">
+                <span class="orb-symbol" aria-hidden="true"></span>
+              </span>
+            </button>
+            <div class="voice-status">
+              <p class="voice-state" id="voiceState">Ready when you are</p>
+              <p class="voice-hint" id="voiceHint">Tap the orb and speak naturally. She will listen, pause, and ask the next gentle question.</p>
+            </div>
+          </div>
 
-          <form class="composer" id="composer">
-            <label for="messageInput" class="sr-only">Reply to your daily friend</label>
-            <textarea
-              id="messageInput"
-              rows="3"
-              placeholder="Write a little about what stayed with you..."
-            ></textarea>
-            <button class="primary-button" type="submit">Send</button>
+          <div class="voice-controls">
+            <button class="primary-button" id="startVoice" type="button">Start live voice</button>
+            <button class="secondary-button" id="finishVoice" type="button">Finish and draft</button>
+          </div>
+
+          <div class="sound-bars" id="soundBars" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+
+          <div class="transcript-pocket">
+            <button class="text-button" id="toggleTranscript" type="button">Show quiet transcript</button>
+            <div class="messages" id="messages" aria-live="polite" hidden></div>
+          </div>
+
+          <form class="composer sr-only" id="composer">
+            <label for="messageInput">Reply to your daily friend</label>
+            <textarea id="messageInput" rows="3"></textarea>
+            <button type="submit">Send</button>
           </form>
         </div>
 

@@ -2,10 +2,20 @@ const STORAGE_KEY = "this-day-then.entries.v1";
 const CHAT_KEY = "this-day-then.chat.v1";
 const THEME_KEY = "this-day-then.theme.v1";
 
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
 const state = {
   selectedDate: toDateInputValue(new Date()),
   entries: loadEntries(),
   chat: loadChat(),
+  voice: {
+    active: false,
+    listening: false,
+    speaking: false,
+    recognition: null,
+    mode: "browser-demo",
+    transcriptVisible: false,
+  },
 };
 
 const prompts = [
@@ -41,6 +51,7 @@ const demoEntries = [
 ];
 
 const elements = {
+  breathCanvas: document.querySelector("#breathCanvas"),
   dateInput: document.querySelector("#dateInput"),
   dateHeading: document.querySelector("#date-heading"),
   messages: document.querySelector("#messages"),
@@ -58,6 +69,13 @@ const elements = {
   seedDemoData: document.querySelector("#seedDemoData"),
   timelineSeedDemoData: document.querySelector("#timelineSeedDemoData"),
   themeToggle: document.querySelector("#themeToggle"),
+  voiceOrb: document.querySelector("#voiceOrb"),
+  voiceStage: document.querySelector(".voice-stage"),
+  voiceState: document.querySelector("#voiceState"),
+  voiceHint: document.querySelector("#voiceHint"),
+  startVoice: document.querySelector("#startVoice"),
+  finishVoice: document.querySelector("#finishVoice"),
+  toggleTranscript: document.querySelector("#toggleTranscript"),
 };
 
 init();
@@ -71,6 +89,8 @@ function init() {
   ensureChatForDate();
   bindEvents();
   render();
+  startBreathCanvas();
+  checkVoiceMode();
 }
 
 function bindEvents() {
@@ -79,6 +99,7 @@ function bindEvents() {
   });
 
   elements.dateInput.addEventListener("change", (event) => {
+    stopVoiceSession();
     state.selectedDate = event.target.value;
     ensureChatForDate();
     render();
@@ -88,15 +109,21 @@ function bindEvents() {
     event.preventDefault();
     const text = elements.messageInput.value.trim();
     if (!text) return;
-
-    currentChat().push({ role: "user", text, at: new Date().toISOString() });
+    acceptUserVoiceText(text);
     elements.messageInput.value = "";
-    const nextPrompt = prompts[Math.min(countUserMessages(), prompts.length - 1)];
-    currentChat().push({ role: "bot", text: nextPrompt, at: new Date().toISOString() });
-    persistChat();
-    renderMessages();
   });
 
+  elements.voiceOrb.addEventListener("click", () => {
+    if (state.voice.active) {
+      finishVoiceSession();
+    } else {
+      startVoiceSession();
+    }
+  });
+
+  elements.startVoice.addEventListener("click", startVoiceSession);
+  elements.finishVoice.addEventListener("click", finishVoiceSession);
+  elements.toggleTranscript.addEventListener("click", toggleTranscript);
   elements.generateSummary.addEventListener("click", () => draftSummary());
   elements.regenerateSummary.addEventListener("click", () => draftSummary(true));
   elements.saveSummary.addEventListener("click", saveSummary);
@@ -129,6 +156,7 @@ function render() {
   renderMessages();
   renderYearStack();
   renderArchive();
+  updateVoiceUI("idle");
 }
 
 function renderMessages() {
@@ -139,6 +167,7 @@ function renderMessages() {
     bubble.textContent = message.text;
     elements.messages.appendChild(bubble);
   });
+  elements.messages.hidden = !state.voice.transcriptVisible;
   elements.messages.scrollTop = elements.messages.scrollHeight;
 }
 
@@ -160,7 +189,6 @@ function renderYearStack() {
     const meta = document.createElement("div");
     meta.className = "year-meta";
     meta.innerHTML = `<span class="year-number">${year}</span><span>${entry ? "saved" : "empty"}</span>`;
-
     card.appendChild(meta);
 
     if (entry) {
@@ -170,7 +198,7 @@ function renderYearStack() {
       empty.className = "empty-state";
       empty.textContent =
         year === selectedYear
-          ? "Write today, then save the five lines here."
+          ? "Speak today into five lines, then this year will appear here."
           : "No memory yet for this date.";
       card.appendChild(empty);
     }
@@ -204,6 +232,7 @@ function renderArchive() {
     button.type = "button";
     button.textContent = "Open date";
     button.addEventListener("click", () => {
+      stopVoiceSession();
       state.selectedDate = entry.date;
       ensureChatForDate();
       switchView("timeline");
@@ -213,6 +242,190 @@ function renderArchive() {
     item.append(meta, linesToList(entry.summary), button);
     elements.archiveList.appendChild(item);
   });
+}
+
+async function checkVoiceMode() {
+  try {
+    const response = await fetch("/api/voice-status");
+    if (!response.ok) return;
+    const data = await response.json();
+    state.voice.mode = data.mode || "browser-demo";
+    if (data.realtimeReady) {
+      elements.voiceHint.textContent =
+        "Realtime voice is configured. Tap the orb to begin a live audio check-in.";
+    }
+  } catch {
+    state.voice.mode = "browser-demo";
+  }
+}
+
+function startVoiceSession() {
+  if (state.voice.active) return;
+  state.voice.active = true;
+  updateVoiceUI("speaking", "She is beginning softly");
+  speakBot(nextPromptText());
+}
+
+function finishVoiceSession() {
+  stopVoiceSession();
+  draftSummary();
+  updateVoiceUI("idle", "Five lines are ready to shape");
+  flashButton(elements.finishVoice, "Drafted");
+}
+
+function stopVoiceSession() {
+  state.voice.active = false;
+  state.voice.listening = false;
+  state.voice.speaking = false;
+  window.speechSynthesis?.cancel();
+  if (state.voice.recognition) {
+    state.voice.recognition.onend = null;
+    state.voice.recognition.stop();
+    state.voice.recognition = null;
+  }
+}
+
+function speakBot(text) {
+  pushMessage("bot", text);
+  updateVoiceUI("speaking", "She is speaking");
+
+  if (!("speechSynthesis" in window)) {
+    updateVoiceUI("listening", "Listening");
+    startListening();
+    return;
+  }
+
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.rate = 0.88;
+  utterance.pitch = 1.08;
+  utterance.volume = 0.9;
+
+  const preferredVoice = window.speechSynthesis
+    .getVoices()
+    .find((voice) => /female|samantha|victoria|karen|moira|tessa|zira/i.test(voice.name));
+  if (preferredVoice) utterance.voice = preferredVoice;
+
+  utterance.onend = () => {
+    state.voice.speaking = false;
+    if (state.voice.active) {
+      updateVoiceUI("listening", "Listening");
+      startListening();
+    }
+  };
+
+  utterance.onerror = () => {
+    if (state.voice.active) {
+      updateVoiceUI("listening", "Listening");
+      startListening();
+    }
+  };
+
+  state.voice.speaking = true;
+  window.speechSynthesis.speak(utterance);
+}
+
+function startListening() {
+  if (!state.voice.active || state.voice.listening) return;
+
+  if (!SpeechRecognition) {
+    updateVoiceUI(
+      "idle",
+      "Voice recognition is not available here",
+      "Try this in Chrome, or use the hidden transcript input with a keyboard."
+    );
+    state.voice.active = false;
+    return;
+  }
+
+  const recognition = new SpeechRecognition();
+  recognition.continuous = true;
+  recognition.interimResults = false;
+  recognition.lang = "en-US";
+  state.voice.recognition = recognition;
+
+  recognition.onresult = (event) => {
+    const result = event.results[event.results.length - 1];
+    const text = result?.[0]?.transcript?.trim();
+    if (text) {
+      acceptUserVoiceText(text);
+    }
+  };
+
+  recognition.onerror = () => {
+    updateVoiceUI("idle", "The mic went quiet", "Tap the orb again when you are ready.");
+    stopVoiceSession();
+  };
+
+  recognition.onend = () => {
+    state.voice.listening = false;
+    if (state.voice.active && !state.voice.speaking) {
+      window.setTimeout(() => startListening(), 500);
+    }
+  };
+
+  state.voice.listening = true;
+  updateVoiceUI("listening", "Listening");
+  recognition.start();
+}
+
+function acceptUserVoiceText(text) {
+  pushMessage("user", text);
+  if (state.voice.recognition) {
+    state.voice.recognition.onend = null;
+    state.voice.recognition.stop();
+    state.voice.recognition = null;
+  }
+  state.voice.listening = false;
+
+  if (!state.voice.active) return;
+
+  const userCount = countUserMessages();
+  const nextPrompt =
+    userCount >= prompts.length
+      ? "That feels like enough for today. When you are ready, I can turn this into five lines."
+      : prompts[Math.min(userCount, prompts.length - 1)];
+
+  updateVoiceUI("thinking", "Letting that settle");
+  window.setTimeout(() => {
+    if (state.voice.active) speakBot(nextPrompt);
+  }, 850);
+}
+
+function pushMessage(role, text) {
+  currentChat().push({ role, text, at: new Date().toISOString() });
+  persistChat();
+  renderMessages();
+}
+
+function nextPromptText() {
+  const userCount = countUserMessages();
+  return prompts[Math.min(userCount, prompts.length - 1)];
+}
+
+function updateVoiceUI(status, label, hint) {
+  elements.voiceStage.dataset.voiceState = status;
+  const labels = {
+    idle: "Ready when you are",
+    listening: "Listening",
+    thinking: "Letting that settle",
+    speaking: "She is speaking",
+  };
+  elements.voiceState.textContent = label || labels[status] || labels.idle;
+  elements.voiceHint.textContent =
+    hint ||
+    (status === "idle"
+      ? "Tap the orb and speak naturally. She will listen, pause, and ask the next gentle question."
+      : "No transcript is shown while you speak. The day is gathered quietly in the background.");
+  elements.startVoice.textContent = state.voice.active ? "Live voice is open" : "Start live voice";
+}
+
+function toggleTranscript() {
+  state.voice.transcriptVisible = !state.voice.transcriptVisible;
+  elements.toggleTranscript.textContent = state.voice.transcriptVisible
+    ? "Hide quiet transcript"
+    : "Show quiet transcript";
+  renderMessages();
 }
 
 function renderReflection() {
@@ -282,16 +495,29 @@ function saveSummary() {
 }
 
 function resetChat() {
-  state.chat[state.selectedDate] = [
-    { role: "bot", text: prompts[0], at: new Date().toISOString() },
-  ];
+  stopVoiceSession();
+  state.chat[state.selectedDate] = [];
   persistChat();
   renderMessages();
+  elements.summaryEditor.value = "";
+  updateVoiceUI("idle", "Ready when you are");
 }
 
 function addDemoMemories() {
-  demoEntries.forEach((entry) => {
-    if (!state.entries[entry.date]) state.entries[entry.date] = entry;
+  const selected = parseLocalDate(state.selectedDate);
+  const month = selected.getMonth();
+  const day = selected.getDate();
+  const selectedYear = selected.getFullYear();
+
+  demoEntries.forEach((entry, index) => {
+    const date = toDateInputValue(new Date(selectedYear - index - 1, month, day));
+    if (!state.entries[date]) {
+      state.entries[date] = {
+        ...entry,
+        date,
+        updatedAt: new Date(selectedYear - index - 1, month, day, 21, 12).toISOString(),
+      };
+    }
   });
   persistEntries();
   render();
@@ -306,9 +532,7 @@ function toggleTheme() {
 
 function ensureChatForDate() {
   if (!state.chat[state.selectedDate]) {
-    state.chat[state.selectedDate] = [
-      { role: "bot", text: prompts[0], at: new Date().toISOString() },
-    ];
+    state.chat[state.selectedDate] = [];
     persistChat();
   }
 }
@@ -359,15 +583,16 @@ function normalizeFiveLines(value) {
 
 function extractDetails(text) {
   const peopleMatch = text.match(/\b(mom|dad|friend|partner|sister|brother|team|client|boss|child|family)\b/i);
-  const placeMatch = text.match(/\b(home|office|train|kitchen|park|street|cafe|school|studio|airport|room)\b/i);
+  const placeMatch = text.match(/\b(home|office|train|kitchen|park|street|cafe|school|studio|airport|room|garden|river|forest)\b/i);
   const lower = text.toLowerCase();
 
   let anchor = "A small ordinary moment";
   if (lower.includes("walk")) anchor = "The walk";
   else if (lower.includes("conversation") || lower.includes("talked") || lower.includes("message")) anchor = "The conversation";
   else if (lower.includes("work")) anchor = "The shape of the workday";
-  else if (lower.includes("coffee")) anchor = "A small coffee moment";
+  else if (lower.includes("coffee") || lower.includes("tea")) anchor = "A small warm drink";
   else if (lower.includes("rain")) anchor = "The weather";
+  else if (lower.includes("deploy") || lower.includes("build")) anchor = "The feeling of making something real";
 
   return {
     anchor,
@@ -381,7 +606,7 @@ function inferTone(text) {
   if (/(tired|heavy|sad|hard|lonely|anxious|worried|stress)/.test(lower)) return "heavy but still held";
   if (/(happy|good|sweet|grateful|calm|peace|soft|nice)/.test(lower)) return "soft and grateful";
   if (/(busy|work|deadline|meeting|running)/.test(lower)) return "full and a little stretched";
-  if (/(new|begin|first|change|move)/.test(lower)) return "new, uncertain, and alive";
+  if (/(new|begin|first|change|move|real|deploy|launch)/.test(lower)) return "new, uncertain, and alive";
   return "ordinary in a way that deserves remembering";
 }
 
@@ -389,11 +614,76 @@ function inferThemes(text) {
   const lower = text.toLowerCase();
   const themes = [];
   if (/(home|family|mom|dad|sister|brother)/.test(lower)) themes.push("home and belonging");
-  if (/(work|meeting|client|deadline|project)/.test(lower)) themes.push("work and becoming");
+  if (/(work|meeting|client|deadline|project|deploy|build)/.test(lower)) themes.push("work and becoming");
   if (/(tired|rest|sleep|energy|quiet)/.test(lower)) themes.push("energy and rest");
   if (/(friend|partner|message|conversation)/.test(lower)) themes.push("connection");
   if (/(new|begin|change|city|route)/.test(lower)) themes.push("change");
   return themes.length ? themes.slice(0, 3).join(", ") : "ordinary tenderness";
+}
+
+function startBreathCanvas() {
+  const canvas = elements.breathCanvas;
+  const context = canvas.getContext("2d");
+  const particles = Array.from({ length: 58 }, (_, index) => ({
+    seed: index * 97,
+    radius: 1.2 + Math.random() * 2.2,
+    drift: 0.15 + Math.random() * 0.45,
+    phase: Math.random() * Math.PI * 2,
+    hue: Math.random(),
+  }));
+
+  function resize() {
+    const ratio = window.devicePixelRatio || 1;
+    canvas.width = Math.floor(window.innerWidth * ratio);
+    canvas.height = Math.floor(window.innerHeight * ratio);
+    canvas.style.width = `${window.innerWidth}px`;
+    canvas.style.height = `${window.innerHeight}px`;
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  }
+
+  function draw(time) {
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    context.clearRect(0, 0, width, height);
+
+    const breath = (Math.sin(time / 4200) + 1) / 2;
+    const gradient = context.createRadialGradient(
+      width * 0.5,
+      height * 0.22,
+      10,
+      width * 0.5,
+      height * 0.25,
+      width * (0.55 + breath * 0.08)
+    );
+    gradient.addColorStop(0, `rgba(207, 232, 201, ${0.18 + breath * 0.08})`);
+    gradient.addColorStop(0.55, "rgba(158, 207, 192, 0.08)");
+    gradient.addColorStop(1, "rgba(247, 251, 243, 0)");
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, width, height);
+
+    particles.forEach((particle, index) => {
+      const x =
+        ((particle.seed * 37 + time * particle.drift * 0.018) % (width + 120)) - 60;
+      const y =
+        height * (0.08 + ((particle.seed * 13) % 90) / 100) +
+        Math.sin(time / 2800 + particle.phase) * 18;
+      const alpha = 0.14 + Math.sin(time / 2200 + index) * 0.05;
+
+      context.beginPath();
+      context.arc(x, y, particle.radius + breath * 0.9, 0, Math.PI * 2);
+      context.fillStyle =
+        particle.hue > 0.55
+          ? `rgba(91, 143, 99, ${alpha})`
+          : `rgba(122, 174, 157, ${alpha})`;
+      context.fill();
+    });
+
+    requestAnimationFrame(draw);
+  }
+
+  resize();
+  window.addEventListener("resize", resize);
+  requestAnimationFrame(draw);
 }
 
 function loadEntries() {

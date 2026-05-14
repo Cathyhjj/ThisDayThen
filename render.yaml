@@ -1,7 +1,8 @@
 services:
   - type: web
     name: this-day-then
-    runtime: static
-    buildCommand: echo "No build needed"
-    staticPublishPath: .
+    runtime: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
     autoDeployTrigger: commit

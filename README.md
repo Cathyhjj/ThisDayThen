@@ -6,7 +6,9 @@ The prototype is intentionally static so the product feeling can be tested quick
 
 ## What works
 
-- Daily warm-friend check-in
+- Audio-first warm-friend check-in UI
+- Browser demo live voice mode with speech recognition/synthesis where supported
+- Green meditative design with a breathing canvas background
 - Drafts a five-line memory from the conversation
 - Saves entries in local storage
 - Shows the selected date across five years
@@ -15,6 +17,14 @@ The prototype is intentionally static so the product feeling can be tested quick
 
 ## Try it
 
-Open `index.html` in a browser.
+Run the local web service:
 
-This version uses a local simulated AI draft instead of an API call.
+```sh
+npm start
+```
+
+Then open `http://127.0.0.1:3000`.
+
+This version still uses local summary drafting. The server includes `/api/realtime-session`
+for OpenAI Realtime WebRTC, but real voice AI requires setting `OPENAI_API_KEY` in the
+Render environment.
