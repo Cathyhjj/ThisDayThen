@@ -8,3 +8,4 @@ services:
     autoDeployTrigger: commit
     domains:
       - thisdaythen.com
+      - www.thisdaythen.com
