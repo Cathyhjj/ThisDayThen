@@ -6,3 +6,5 @@ services:
     buildCommand: npm install
     startCommand: npm start
     autoDeployTrigger: commit
+    domains:
+      - thisdaythen.com
