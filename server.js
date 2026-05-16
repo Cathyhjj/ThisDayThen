@@ -12,8 +12,10 @@ const databasePath = process.env.DIARY_DB_PATH
   ? path.resolve(process.env.DIARY_DB_PATH)
   : path.join(__dirname, "data", "this-day-then-db.json");
 const sessionMaxAgeSeconds = 60 * 60 * 24 * 30;
+const oauthCookieMaxAgeSeconds = 60 * 10;
 const maxJsonBytes = 1024 * 1024;
 const database = loadDatabase();
+let googleJwksCache = { expiresAt: 0, keys: [] };
 
 const mimeTypes = {
   ".css": "text/css; charset=utf-8",
@@ -41,6 +43,16 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && url.pathname === "/api/auth/login") {
       await handleLogin(req, res);
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/auth/google") {
+      handleGoogleStart(req, res);
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/auth/google/callback") {
+      await handleGoogleCallback(req, res, url);
       return;
     }
 
@@ -139,6 +151,7 @@ async function handleRegister(req, res) {
     id: crypto.randomUUID(),
     name,
     email,
+    authProvider: "password",
     passwordHash: hashPassword(password),
     createdAt: now,
     updatedAt: now,
@@ -167,7 +180,7 @@ async function handleLogin(req, res) {
   const password = typeof payload.password === "string" ? payload.password : "";
   const user = database.users.find((candidate) => candidate.email === email);
 
-  if (!user || !verifyPassword(password, user.passwordHash)) {
+  if (!user || !user.passwordHash || !verifyPassword(password, user.passwordHash)) {
     sendJson(res, 401, { error: "Email or password is not right." });
     return;
   }
@@ -180,6 +193,81 @@ async function handleLogin(req, res) {
     "Set-Cookie": buildSessionCookie(sessionToken, req),
   });
   res.end(JSON.stringify({ user: publicUser(user) }));
+}
+
+function handleGoogleStart(req, res) {
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    redirectWithAuthMessage(req, res, "Google sign-in is not configured yet.");
+    return;
+  }
+
+  const state = crypto.randomBytes(24).toString("base64url");
+  const nonce = crypto.randomBytes(24).toString("base64url");
+  const redirectUri = googleRedirectUri(req);
+  const authorizationUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  authorizationUrl.search = new URLSearchParams({
+    client_id: process.env.GOOGLE_CLIENT_ID,
+    redirect_uri: redirectUri,
+    response_type: "code",
+    scope: "openid email profile",
+    state,
+    nonce,
+    prompt: "select_account",
+  }).toString();
+
+  res.writeHead(302, {
+    Location: authorizationUrl.toString(),
+    "Set-Cookie": [
+      buildTemporaryCookie("google_oauth_state", state, req),
+      buildTemporaryCookie("google_oauth_nonce", nonce, req),
+    ],
+  });
+  res.end();
+}
+
+async function handleGoogleCallback(req, res, url) {
+  const cookies = parseCookies(req.headers.cookie);
+  const expectedState = cookies.google_oauth_state;
+  const expectedNonce = cookies.google_oauth_nonce;
+  const state = url.searchParams.get("state") || "";
+  const code = url.searchParams.get("code") || "";
+  const oauthError = url.searchParams.get("error");
+
+  if (oauthError) {
+    redirectWithAuthMessage(req, res, "Google sign-in was cancelled.");
+    return;
+  }
+
+  if (!expectedState || !expectedNonce || state !== expectedState || !code) {
+    redirectWithAuthMessage(req, res, "Google sign-in could not be verified.");
+    return;
+  }
+
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    redirectWithAuthMessage(req, res, "Google sign-in is not configured yet.");
+    return;
+  }
+
+  try {
+    const tokens = await exchangeGoogleCode(req, code);
+    const claims = await verifyGoogleIdToken(tokens.id_token, expectedNonce);
+    const user = findOrCreateGoogleUser(claims);
+    const sessionToken = createSession(user.id);
+    writeDatabase();
+
+    res.writeHead(302, {
+      Location: "/",
+      "Set-Cookie": [
+        buildSessionCookie(sessionToken, req),
+        clearCookie("google_oauth_state", req),
+        clearCookie("google_oauth_nonce", req),
+      ],
+    });
+    res.end();
+  } catch (error) {
+    console.error("Google sign-in failed.", error);
+    redirectWithAuthMessage(req, res, "Google sign-in failed. Try again.");
+  }
 }
 
 function handleLogout(req, res) {
@@ -395,6 +483,131 @@ function requireUser(req, res) {
   return user;
 }
 
+async function exchangeGoogleCode(req, code) {
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      code,
+      client_id: process.env.GOOGLE_CLIENT_ID,
+      client_secret: process.env.GOOGLE_CLIENT_SECRET,
+      redirect_uri: googleRedirectUri(req),
+      grant_type: "authorization_code",
+    }),
+  });
+
+  const payload = await response.json();
+  if (!response.ok || !payload.id_token) {
+    throw new Error(payload.error_description || payload.error || "Token exchange failed.");
+  }
+
+  return payload;
+}
+
+async function verifyGoogleIdToken(idToken, expectedNonce) {
+  const [headerSegment, payloadSegment, signatureSegment] = String(idToken).split(".");
+  if (!headerSegment || !payloadSegment || !signatureSegment) {
+    throw new Error("Malformed Google ID token.");
+  }
+
+  const header = parseBase64UrlJson(headerSegment);
+  const claims = parseBase64UrlJson(payloadSegment);
+  if (header.alg !== "RS256" || !header.kid) {
+    throw new Error("Unsupported Google ID token.");
+  }
+
+  const jwks = await getGoogleJwks();
+  const jwk = jwks.keys.find((key) => key.kid === header.kid);
+  if (!jwk) {
+    throw new Error("Google signing key was not found.");
+  }
+
+  const verifier = crypto.createVerify("RSA-SHA256");
+  verifier.update(`${headerSegment}.${payloadSegment}`);
+  verifier.end();
+  const verified = verifier.verify(
+    crypto.createPublicKey({ key: jwk, format: "jwk" }),
+    Buffer.from(signatureSegment, "base64url")
+  );
+  if (!verified) {
+    throw new Error("Google ID token signature is invalid.");
+  }
+
+  const issuerValid = claims.iss === "https://accounts.google.com" || claims.iss === "accounts.google.com";
+  if (!issuerValid || claims.aud !== process.env.GOOGLE_CLIENT_ID) {
+    throw new Error("Google ID token audience or issuer is invalid.");
+  }
+
+  if (Number(claims.exp) * 1000 <= Date.now()) {
+    throw new Error("Google ID token is expired.");
+  }
+
+  if (claims.nonce !== expectedNonce) {
+    throw new Error("Google ID token nonce is invalid.");
+  }
+
+  if (!claims.sub || !claims.email || claims.email_verified !== true) {
+    throw new Error("Google account email is not verified.");
+  }
+
+  return claims;
+}
+
+async function getGoogleJwks() {
+  if (googleJwksCache.keys.length && googleJwksCache.expiresAt > Date.now()) {
+    return googleJwksCache;
+  }
+
+  const response = await fetch("https://www.googleapis.com/oauth2/v3/certs");
+  if (!response.ok) {
+    throw new Error("Could not fetch Google signing keys.");
+  }
+
+  const payload = await response.json();
+  const cacheControl = response.headers.get("cache-control") || "";
+  const maxAgeMatch = cacheControl.match(/max-age=(\d+)/);
+  const maxAgeSeconds = maxAgeMatch ? Number(maxAgeMatch[1]) : 3600;
+  googleJwksCache = {
+    expiresAt: Date.now() + maxAgeSeconds * 1000,
+    keys: Array.isArray(payload.keys) ? payload.keys : [],
+  };
+  return googleJwksCache;
+}
+
+function findOrCreateGoogleUser(claims) {
+  const googleId = String(claims.sub);
+  const email = normalizeEmail(claims.email);
+  const name = normalizeName(claims.name) || email.split("@")[0] || "Google user";
+  const now = new Date().toISOString();
+  let user =
+    database.users.find((candidate) => candidate.googleId === googleId) ||
+    database.users.find((candidate) => candidate.email === email);
+
+  if (user) {
+    user.googleId = user.googleId || googleId;
+    user.authProvider = user.passwordHash ? "password+google" : "google";
+    user.name = user.name || name;
+    user.avatarUrl = typeof claims.picture === "string" ? claims.picture : user.avatarUrl || "";
+    user.updatedAt = now;
+    return user;
+  }
+
+  user = {
+    id: crypto.randomUUID(),
+    name,
+    email,
+    googleId,
+    authProvider: "google",
+    avatarUrl: typeof claims.picture === "string" ? claims.picture : "",
+    createdAt: now,
+    updatedAt: now,
+  };
+  database.users.push(user);
+  return user;
+}
+
 function getAuthenticatedUser(req) {
   const sessionToken = parseCookies(req.headers.cookie).session;
   if (!sessionToken) return null;
@@ -443,14 +656,30 @@ function buildSessionCookie(token, req) {
   return parts.join("; ");
 }
 
+function buildTemporaryCookie(name, value, req) {
+  const parts = [
+    `${name}=${encodeURIComponent(value)}`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Lax",
+    `Max-Age=${oauthCookieMaxAgeSeconds}`,
+  ];
+  if (isSecureRequest(req)) parts.push("Secure");
+  return parts.join("; ");
+}
+
 function clearSessionCookie(req) {
-  const parts = ["session=", "Path=/", "HttpOnly", "SameSite=Lax", "Max-Age=0"];
+  return clearCookie("session", req);
+}
+
+function clearCookie(name, req) {
+  const parts = [`${name}=`, "Path=/", "HttpOnly", "SameSite=Lax", "Max-Age=0"];
   if (isSecureRequest(req)) parts.push("Secure");
   return parts.join("; ");
 }
 
 function isSecureRequest(req) {
-  return Boolean(req.socket.encrypted || req.headers["x-forwarded-proto"] === "https");
+  return Boolean(req.socket.encrypted || firstHeaderValue(req.headers["x-forwarded-proto"]) === "https");
 }
 
 function hashSessionToken(token) {
@@ -490,6 +719,8 @@ function publicUser(user) {
     id: user.id,
     name: user.name,
     email: user.email,
+    avatarUrl: user.avatarUrl || "",
+    authProvider: user.authProvider || (user.googleId ? "google" : "password"),
     createdAt: user.createdAt,
   };
 }
@@ -559,6 +790,37 @@ function writeDatabase() {
   const tempPath = `${databasePath}.${process.pid}.tmp`;
   fs.writeFileSync(tempPath, `${JSON.stringify(database, null, 2)}\n`);
   fs.renameSync(tempPath, databasePath);
+}
+
+function googleRedirectUri(req) {
+  return process.env.GOOGLE_REDIRECT_URI || `${requestOrigin(req)}/api/auth/google/callback`;
+}
+
+function requestOrigin(req) {
+  const forwardedProto = firstHeaderValue(req.headers["x-forwarded-proto"]);
+  const forwardedHost = firstHeaderValue(req.headers["x-forwarded-host"]);
+  const protocol = forwardedProto || (isSecureRequest(req) ? "https" : "http");
+  const host = forwardedHost || req.headers.host || `127.0.0.1:${port}`;
+  return `${protocol}://${host}`;
+}
+
+function firstHeaderValue(value) {
+  if (Array.isArray(value)) return value[0];
+  return typeof value === "string" ? value.split(",")[0].trim() : "";
+}
+
+function redirectWithAuthMessage(req, res, message) {
+  const destination = new URL("/", requestOrigin(req));
+  destination.searchParams.set("authMessage", message);
+  res.writeHead(302, {
+    Location: `${destination.pathname}${destination.search}`,
+    "Set-Cookie": [clearCookie("google_oauth_state", req), clearCookie("google_oauth_nonce", req)],
+  });
+  res.end();
+}
+
+function parseBase64UrlJson(value) {
+  return JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
 }
 
 function serveStatic(pathname, res, isHead) {

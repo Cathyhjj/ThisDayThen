@@ -1,4 +1,5 @@
 const THEME_KEY = "this-day-then.theme.v1";
+const GUEST_MESSAGE = "Guest mode is temporary. Entries stay only until this page is refreshed.";
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
@@ -151,16 +152,17 @@ function bindEvents() {
 }
 
 async function initializeAuth() {
+  const redirectMessage = readAuthRedirectMessage();
   setAuthMessage("Checking your session...");
   try {
     const data = await apiFetch("/api/auth/me");
     if (data.user) {
       await finishSignIn(data.user);
     } else {
-      showSignedOut("");
+      startGuestSession(redirectMessage || GUEST_MESSAGE, false);
     }
   } catch (error) {
-    showSignedOut("Sign in to save entries on this device.");
+    startGuestSession(redirectMessage || GUEST_MESSAGE, false);
   } finally {
     state.auth.ready = true;
   }
@@ -202,7 +204,7 @@ async function handleLogout() {
   } finally {
     state.entries = {};
     state.chat = {};
-    showSignedOut("Signed out.");
+    startGuestSession("Signed out. Guest entries are temporary until refresh.");
     elements.logoutButton.disabled = false;
   }
 }
@@ -214,20 +216,24 @@ async function finishSignIn(user) {
   await loadEntriesFromServer();
 }
 
-function showSignedOut(message) {
+function startGuestSession(message = GUEST_MESSAGE, shouldReset = true) {
   state.auth.user = null;
-  state.entries = {};
-  state.chat = {};
+  if (shouldReset) {
+    state.entries = {};
+    state.chat = {};
+  }
+  ensureChatForDate();
   updateAuthUI();
   setAuthMessage(message);
+  render();
 }
 
 function updateAuthUI() {
   const signedIn = Boolean(state.auth.user);
   elements.authPanel.hidden = signedIn;
-  elements.appContent.hidden = !signedIn;
+  elements.appContent.hidden = false;
   elements.logoutButton.hidden = !signedIn;
-  elements.accountName.textContent = signedIn ? state.auth.user.name : "Signed out";
+  elements.accountName.textContent = signedIn ? state.auth.user.name : "Guest session";
 }
 
 function setAuthMessage(message, isError = false) {
@@ -245,6 +251,17 @@ async function loadEntriesFromServer() {
   }, {});
   ensureChatForDate();
   render();
+}
+
+function readAuthRedirectMessage() {
+  const params = new URLSearchParams(window.location.search);
+  const message = params.get("authMessage");
+  if (!message) return "";
+
+  params.delete("authMessage");
+  const query = params.toString();
+  window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+  return message;
 }
 
 function switchView(viewName) {
@@ -824,11 +841,6 @@ function draftSummary(isRegeneration = false) {
 }
 
 async function saveSummary() {
-  if (!state.auth.user) {
-    showSignedOut("Sign in before saving a diary entry.");
-    return;
-  }
-
   const summary = normalizeFiveLines(elements.summaryEditor.value);
   if (!summary) return;
 
@@ -838,6 +850,16 @@ async function saveSummary() {
     conversation: currentChat(),
     updatedAt: new Date().toISOString(),
   };
+
+  if (!state.auth.user) {
+    const savedEntry = saveEntryInMemory(draftEntry);
+    elements.summaryEditor.value = savedEntry.summary;
+    renderYearStack();
+    renderArchive();
+    setAuthMessage("Saved temporarily for this page session. Sign in to keep it.");
+    flashButton(elements.saveSummary, "Saved");
+    return;
+  }
 
   elements.saveSummary.disabled = true;
 
@@ -867,11 +889,6 @@ function resetChat() {
 }
 
 async function addDemoMemories() {
-  if (!state.auth.user) {
-    showSignedOut("Sign in before adding sample diary entries.");
-    return;
-  }
-
   const selected = parseLocalDate(state.selectedDate);
   const month = selected.getMonth();
   const day = selected.getDate();
@@ -888,6 +905,14 @@ async function addDemoMemories() {
       });
     }
   });
+
+  if (!state.auth.user) {
+    drafts.forEach(saveEntryInMemory);
+    render();
+    switchView("timeline");
+    setAuthMessage("Sample entries are temporary for this page session.");
+    return;
+  }
 
   try {
     await Promise.all(
@@ -1262,6 +1287,22 @@ async function saveEntryToServer(entry) {
     },
   });
   return data.entry;
+}
+
+function saveEntryInMemory(entry) {
+  const now = new Date().toISOString();
+  const existing = state.entries[entry.date];
+  const savedEntry = {
+    id: existing?.id || `guest-${entry.date}`,
+    date: entry.date,
+    summary: entry.summary,
+    conversation: Array.isArray(entry.conversation) ? entry.conversation : [],
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+  state.entries[savedEntry.date] = savedEntry;
+  state.chat[savedEntry.date] = savedEntry.conversation;
+  return savedEntry;
 }
 
 async function apiFetch(url, options = {}) {
