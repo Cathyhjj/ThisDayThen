@@ -105,6 +105,34 @@
             </label>
             <button class="secondary-button" type="submit">Create account</button>
           </form>
+
+          <form class="auth-form" id="verifyForm" hidden>
+            <div>
+              <p class="section-kicker">Check your email</p>
+              <h3>Enter code</h3>
+            </div>
+            <label>
+              <span>Email</span>
+              <input id="verifyEmail" name="email" type="email" autocomplete="email" readonly required />
+            </label>
+            <label>
+              <span>Code</span>
+              <input
+                id="verifyCode"
+                name="code"
+                type="text"
+                inputmode="numeric"
+                pattern="[0-9]{6}"
+                maxlength="6"
+                autocomplete="one-time-code"
+                required
+              />
+            </label>
+            <div class="auth-inline-actions">
+              <button class="primary-button" type="submit">Verify code</button>
+              <button class="text-button" id="restartRegister" type="button">Use another email</button>
+            </div>
+          </form>
         </div>
 
         <p class="auth-message" id="authMessage" role="status"></p>

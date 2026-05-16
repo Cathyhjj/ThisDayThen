@@ -12,6 +12,7 @@ The prototype now includes a small built-in backend for private accounts and sav
 - Green meditative design with a breathing canvas background
 - Drafts a five-line memory from the conversation
 - Creates accounts, logs users in with HttpOnly cookie sessions, and saves entries per user
+- Sends a six-digit email code before creating password accounts
 - Supports Google sign-in when OAuth credentials are configured
 - Lets signed-out visitors use the full diary UI with temporary in-memory entries
 - Stores diary data in a local JSON database
@@ -53,6 +54,20 @@ not set, the server uses the current request origin plus
 `/api/auth/google/callback`.
 `CANONICAL_HOST` keeps `www.thisdaythen.com` and `thisdaythen.com` on the same
 host so OAuth state cookies survive the Google redirect.
+
+## Email registration codes
+
+Password registration now sends a six-digit verification code before the account
+is created. Production email delivery uses Resend:
+
+```sh
+RESEND_API_KEY=your-resend-api-key
+EMAIL_FROM="This Day Then <hello@thisdaythen.com>"
+```
+
+`EMAIL_FROM` must be a sender address or domain verified in Resend. For local
+testing only, set `EMAIL_DEV_MODE=1`; the server will print and return the code
+instead of sending an email.
 
 This version still uses local summary drafting. The server includes `/api/realtime-session`
 for OpenAI Realtime WebRTC, but real voice AI requires setting `OPENAI_API_KEY` in the

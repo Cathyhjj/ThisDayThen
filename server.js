@@ -13,6 +13,9 @@ const databasePath = process.env.DIARY_DB_PATH
   : path.join(__dirname, "data", "this-day-then-db.json");
 const sessionMaxAgeSeconds = 60 * 60 * 24 * 30;
 const oauthCookieMaxAgeSeconds = 60 * 10;
+const registrationCodeMaxAgeMs = 10 * 60 * 1000;
+const registrationCodeCooldownMs = 60 * 1000;
+const maxRegistrationCodeAttempts = 5;
 const maxJsonBytes = 1024 * 1024;
 const database = loadDatabase();
 let googleJwksCache = { expiresAt: 0, keys: [] };
@@ -42,8 +45,16 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (req.method === "POST" && url.pathname === "/api/auth/register") {
-      await handleRegister(req, res);
+    if (
+      req.method === "POST" &&
+      (url.pathname === "/api/auth/register" || url.pathname === "/api/auth/register/start")
+    ) {
+      await handleRegisterStart(req, res);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/auth/register/verify") {
+      await handleRegisterVerify(req, res);
       return;
     }
 
@@ -119,7 +130,7 @@ server.listen(port, () => {
   console.log(`This Day Then is listening on ${port}`);
 });
 
-async function handleRegister(req, res) {
+async function handleRegisterStart(req, res) {
   let payload;
   try {
     payload = await readJson(req);
@@ -128,41 +139,137 @@ async function handleRegister(req, res) {
     return;
   }
 
-  const name = normalizeName(payload.name);
-  const email = normalizeEmail(payload.email);
-  const password = typeof payload.password === "string" ? payload.password : "";
-
-  if (!name) {
-    sendJson(res, 400, { error: "Name is required." });
+  const registration = validateRegistrationPayload(payload);
+  if (registration.error) {
+    sendJson(res, registration.status, { error: registration.error });
     return;
   }
+
+  const { name, email, password } = registration;
+  if (database.users.some((user) => user.email === email)) {
+    sendJson(res, 409, { error: "An account with that email already exists." });
+    return;
+  }
+
+  pruneExpiredEmailCodes();
+  const existingCode = findPendingRegistration(email);
+  if (
+    existingCode &&
+    Date.now() - Date.parse(existingCode.updatedAt || existingCode.createdAt) < registrationCodeCooldownMs
+  ) {
+    sendJson(res, 429, { error: "Please wait a minute before requesting another code." });
+    return;
+  }
+
+  const code = generateRegistrationCode();
+  const salt = crypto.randomBytes(16).toString("base64url");
+  const now = new Date().toISOString();
+  const pendingRegistration = {
+    id: crypto.randomUUID(),
+    purpose: "registration",
+    name,
+    email,
+    passwordHash: hashPassword(password),
+    codeHash: hashRegistrationCode(email, code, salt),
+    salt,
+    attempts: 0,
+    createdAt: now,
+    updatedAt: now,
+    expiresAt: new Date(Date.now() + registrationCodeMaxAgeMs).toISOString(),
+  };
+
+  database.emailCodes = database.emailCodes.filter(
+    (record) => !(record.purpose === "registration" && record.email === email)
+  );
+  database.emailCodes.push(pendingRegistration);
+  writeDatabase();
+
+  try {
+    const delivery = await sendRegistrationCodeEmail({ email, name, code });
+    const response = {
+      pendingVerification: true,
+      email,
+      expiresInSeconds: Math.round(registrationCodeMaxAgeMs / 1000),
+    };
+    if (delivery.devCode) response.devCode = delivery.devCode;
+    sendJson(res, 202, response);
+  } catch (error) {
+    database.emailCodes = database.emailCodes.filter((record) => record.id !== pendingRegistration.id);
+    writeDatabase();
+    console.error("Registration email failed.", error);
+    sendJson(res, error.status || 502, {
+      error: error.publicMessage || error.message || "Could not send the verification email.",
+    });
+  }
+}
+
+async function handleRegisterVerify(req, res) {
+  let payload;
+  try {
+    payload = await readJson(req);
+  } catch (error) {
+    sendJson(res, error.status || 400, { error: error.message });
+    return;
+  }
+
+  const email = normalizeEmail(payload.email);
+  const code = normalizeRegistrationCode(payload.code);
 
   if (!email) {
     sendJson(res, 400, { error: "Enter a valid email address." });
     return;
   }
 
-  if (password.length < 8) {
-    sendJson(res, 400, { error: "Password must be at least 8 characters." });
+  if (!code) {
+    sendJson(res, 400, { error: "Enter the six-digit code." });
+    return;
+  }
+
+  const pruned = pruneExpiredEmailCodes();
+  const pendingRegistration = findPendingRegistration(email);
+  if (!pendingRegistration) {
+    if (pruned) writeDatabase();
+    sendJson(res, 410, { error: "That code expired or was not found. Please request a new one." });
     return;
   }
 
   if (database.users.some((user) => user.email === email)) {
+    database.emailCodes = database.emailCodes.filter((record) => record.id !== pendingRegistration.id);
+    writeDatabase();
     sendJson(res, 409, { error: "An account with that email already exists." });
+    return;
+  }
+
+  const submittedHash = hashRegistrationCode(email, code, pendingRegistration.salt);
+  if (!timingSafeEqualString(submittedHash, pendingRegistration.codeHash)) {
+    pendingRegistration.attempts = Number(pendingRegistration.attempts || 0) + 1;
+    pendingRegistration.updatedAt = new Date().toISOString();
+
+    if (pendingRegistration.attempts >= maxRegistrationCodeAttempts) {
+      database.emailCodes = database.emailCodes.filter((record) => record.id !== pendingRegistration.id);
+      writeDatabase();
+      sendJson(res, 429, { error: "Too many incorrect codes. Please request a new one." });
+      return;
+    }
+
+    writeDatabase();
+    sendJson(res, 401, { error: "That code is not right." });
     return;
   }
 
   const now = new Date().toISOString();
   const user = {
     id: crypto.randomUUID(),
-    name,
+    name: pendingRegistration.name,
     email,
     authProvider: "password",
-    passwordHash: hashPassword(password),
+    passwordHash: pendingRegistration.passwordHash,
+    emailVerifiedAt: now,
     createdAt: now,
     updatedAt: now,
   };
   database.users.push(user);
+  database.emailCodes = database.emailCodes.filter((record) => record.id !== pendingRegistration.id);
   const sessionToken = createSession(user.id);
   writeDatabase();
 
@@ -199,6 +306,90 @@ async function handleLogin(req, res) {
     "Set-Cookie": buildSessionCookie(sessionToken, req),
   });
   res.end(JSON.stringify({ user: publicUser(user) }));
+}
+
+function validateRegistrationPayload(payload) {
+  const name = normalizeName(payload.name);
+  const email = normalizeEmail(payload.email);
+  const password = typeof payload.password === "string" ? payload.password : "";
+
+  if (!name) return { status: 400, error: "Name is required." };
+  if (!email) return { status: 400, error: "Enter a valid email address." };
+  if (password.length < 8) {
+    return { status: 400, error: "Password must be at least 8 characters." };
+  }
+
+  return { name, email, password };
+}
+
+async function sendRegistrationCodeEmail({ email, name, code }) {
+  if (process.env.EMAIL_DEV_MODE === "1") {
+    console.log(`Registration code for ${email}: ${code}`);
+    return { devCode: code };
+  }
+
+  if (!process.env.RESEND_API_KEY || !process.env.EMAIL_FROM) {
+    const error = new Error("Email delivery is not configured yet.");
+    error.status = 503;
+    throw error;
+  }
+
+  let response;
+  try {
+    response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: process.env.EMAIL_FROM,
+        to: [email],
+        subject: "Your This Day Then code",
+        text: [
+          `Hi ${name},`,
+          "",
+          `Your This Day Then verification code is ${code}.`,
+          "It expires in 10 minutes.",
+          "",
+          "If you did not request this, you can ignore this email.",
+        ].join("\n"),
+        html: buildRegistrationEmailHtml({ name, code }),
+      }),
+    });
+  } catch {
+    const error = new Error("Could not reach the email service.");
+    error.status = 502;
+    throw error;
+  }
+
+  if (!response.ok) {
+    const error = new Error("Could not send the verification email.");
+    error.status = 502;
+    try {
+      error.publicMessage = "Could not send the verification email.";
+      error.cause = await response.text();
+    } catch {
+      error.cause = `Email service returned ${response.status}.`;
+    }
+    throw error;
+  }
+
+  return {};
+}
+
+function buildRegistrationEmailHtml({ name, code }) {
+  return `<!doctype html>
+<html>
+  <body style="margin:0;padding:24px;background:#f6fbef;color:#163326;font-family:Arial,sans-serif;">
+    <div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:16px;padding:28px;">
+      <p style="margin:0 0 16px;font-size:16px;">Hi ${escapeHtml(name)},</p>
+      <p style="margin:0 0 18px;font-size:16px;line-height:1.5;">Use this code to finish creating your This Day Then account.</p>
+      <p style="margin:0 0 18px;font-size:32px;font-weight:700;letter-spacing:6px;color:#276243;">${escapeHtml(code)}</p>
+      <p style="margin:0;color:#586d5d;font-size:14px;line-height:1.5;">It expires in 10 minutes. If you did not request this, you can ignore this email.</p>
+    </div>
+  </body>
+</html>`;
 }
 
 function handleGoogleStart(req, res) {
@@ -692,6 +883,42 @@ function hashSessionToken(token) {
   return crypto.createHash("sha256").update(token).digest("base64url");
 }
 
+function generateRegistrationCode() {
+  return String(crypto.randomInt(0, 1000000)).padStart(6, "0");
+}
+
+function normalizeRegistrationCode(value) {
+  if (typeof value !== "string") return "";
+  const digits = value.replace(/\D/g, "");
+  return digits.length === 6 ? digits : "";
+}
+
+function hashRegistrationCode(email, code, salt) {
+  return crypto.createHash("sha256").update(`${salt}:${email}:${code}`).digest("base64url");
+}
+
+function timingSafeEqualString(actual, expected) {
+  const actualBuffer = Buffer.from(String(actual));
+  const expectedBuffer = Buffer.from(String(expected));
+  return (
+    actualBuffer.length === expectedBuffer.length &&
+    crypto.timingSafeEqual(actualBuffer, expectedBuffer)
+  );
+}
+
+function findPendingRegistration(email) {
+  return database.emailCodes.find(
+    (record) => record.purpose === "registration" && record.email === email
+  );
+}
+
+function pruneExpiredEmailCodes() {
+  const now = Date.now();
+  const before = database.emailCodes.length;
+  database.emailCodes = database.emailCodes.filter((record) => Date.parse(record.expiresAt) > now);
+  return database.emailCodes.length !== before;
+}
+
 function parseCookies(header = "") {
   return header.split(";").reduce((cookies, part) => {
     const [rawName, ...rawValue] = part.trim().split("=");
@@ -780,7 +1007,7 @@ function normalizeConversation(value) {
 function loadDatabase() {
   fs.mkdirSync(path.dirname(databasePath), { recursive: true });
   if (!fs.existsSync(databasePath)) {
-    return { users: [], sessions: [], entries: [] };
+    return { users: [], sessions: [], entries: [], emailCodes: [] };
   }
 
   const parsed = JSON.parse(fs.readFileSync(databasePath, "utf8"));
@@ -788,6 +1015,7 @@ function loadDatabase() {
     users: Array.isArray(parsed.users) ? parsed.users : [],
     sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
     entries: Array.isArray(parsed.entries) ? parsed.entries : [],
+    emailCodes: Array.isArray(parsed.emailCodes) ? parsed.emailCodes : [],
   };
 }
 
@@ -831,6 +1059,19 @@ function firstHeaderValue(value) {
 
 function normalizeHost(value = "") {
   return String(value).trim().toLowerCase().replace(/^https?:\/\//, "").split("/")[0].split(":")[0];
+}
+
+function escapeHtml(value = "") {
+  return String(value).replace(/[&<>"']/g, (character) => {
+    const entities = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    };
+    return entities[character];
+  });
 }
 
 function redirectWithAuthMessage(req, res, message) {

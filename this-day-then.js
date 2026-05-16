@@ -11,6 +11,7 @@ const state = {
     user: null,
     ready: false,
     panelOpen: false,
+    pendingRegistrationEmail: "",
   },
   voice: {
     active: false,
@@ -69,6 +70,10 @@ const elements = {
   logoutButton: document.querySelector("#logoutButton"),
   loginForm: document.querySelector("#loginForm"),
   registerForm: document.querySelector("#registerForm"),
+  verifyForm: document.querySelector("#verifyForm"),
+  verifyEmail: document.querySelector("#verifyEmail"),
+  verifyCode: document.querySelector("#verifyCode"),
+  restartRegister: document.querySelector("#restartRegister"),
   authMessage: document.querySelector("#authMessage"),
   dateInput: document.querySelector("#dateInput"),
   dateHeading: document.querySelector("#date-heading"),
@@ -114,6 +119,8 @@ function bindEvents() {
   elements.authToggle.addEventListener("click", toggleAuthPanel);
   elements.loginForm.addEventListener("submit", (event) => handleAuthSubmit(event, "login"));
   elements.registerForm.addEventListener("submit", (event) => handleAuthSubmit(event, "register"));
+  elements.verifyForm.addEventListener("submit", handleRegistrationVerify);
+  elements.restartRegister.addEventListener("click", () => resetRegistrationVerification());
   elements.logoutButton.addEventListener("click", handleLogout);
   document.addEventListener("click", closeAuthPanelOnOutsideClick);
   document.addEventListener("keydown", closeAuthPanelOnEscape);
@@ -181,8 +188,9 @@ async function handleAuthSubmit(event, mode) {
   event.preventDefault();
   const form = event.currentTarget;
   const submitButton = form.querySelector("button[type='submit']");
-  const endpoint = mode === "register" ? "/api/auth/register" : "/api/auth/login";
-  const pendingText = mode === "register" ? "Creating account..." : "Logging in...";
+  const isRegister = mode === "register";
+  const endpoint = isRegister ? "/api/auth/register/start" : "/api/auth/login";
+  const pendingText = isRegister ? "Sending your code..." : "Logging in...";
 
   submitButton.disabled = true;
   setAuthMessage(pendingText);
@@ -193,6 +201,13 @@ async function handleAuthSubmit(event, mode) {
       method: "POST",
       body: payload,
     });
+
+    if (isRegister) {
+      form.reset();
+      showRegistrationVerification(data.email || payload.email, data.devCode);
+      return;
+    }
+
     form.reset();
     await finishSignIn(data.user);
   } catch (error) {
@@ -200,6 +215,50 @@ async function handleAuthSubmit(event, mode) {
   } finally {
     submitButton.disabled = false;
   }
+}
+
+async function handleRegistrationVerify(event) {
+  event.preventDefault();
+  const submitButton = elements.verifyForm.querySelector("button[type='submit']");
+  submitButton.disabled = true;
+  setAuthMessage("Checking your code...");
+
+  try {
+    const data = await apiFetch("/api/auth/register/verify", {
+      method: "POST",
+      body: Object.fromEntries(new FormData(elements.verifyForm)),
+    });
+    elements.verifyForm.reset();
+    resetRegistrationVerification("", false);
+    await finishSignIn(data.user);
+  } catch (error) {
+    setAuthMessage(error.message || "Could not verify that code.", true);
+  } finally {
+    submitButton.disabled = false;
+  }
+}
+
+function showRegistrationVerification(email, devCode = "") {
+  state.auth.pendingRegistrationEmail = email;
+  elements.verifyEmail.value = email;
+  elements.verifyCode.value = devCode || "";
+  elements.registerForm.hidden = true;
+  elements.verifyForm.hidden = false;
+  elements.verifyCode.focus();
+  setAuthMessage(
+    devCode
+      ? `Code sent. Dev code: ${devCode}`
+      : `Code sent to ${email}.`
+  );
+}
+
+function resetRegistrationVerification(message = "Start again with the email you want to use.", shouldFocus = true) {
+  state.auth.pendingRegistrationEmail = "";
+  elements.verifyForm.reset();
+  elements.verifyForm.hidden = true;
+  elements.registerForm.hidden = false;
+  if (message) setAuthMessage(message);
+  if (shouldFocus) elements.registerForm.querySelector("input")?.focus();
 }
 
 async function handleLogout() {
@@ -220,6 +279,7 @@ async function handleLogout() {
 
 async function finishSignIn(user) {
   state.auth.user = user;
+  resetRegistrationVerification("", false);
   setAuthPanelOpen(false);
   updateAuthUI();
   setAuthMessage("");

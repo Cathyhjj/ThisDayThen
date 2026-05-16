@@ -459,6 +459,21 @@ h3 {
   background: var(--surface-solid);
 }
 
+.auth-form input[readonly] {
+  color: var(--muted);
+}
+
+.auth-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.auth-inline-actions .primary-button {
+  flex: 1 1 150px;
+}
+
 .auth-message {
   min-height: 22px;
   margin: 0;

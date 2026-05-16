@@ -15,6 +15,10 @@ services:
         value: https://thisdaythen.com/api/auth/google/callback
       - key: CANONICAL_HOST
         value: thisdaythen.com
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
     domains:
       - thisdaythen.com
       - www.thisdaythen.com
