@@ -25,20 +25,34 @@
           <h1>This day, then</h1>
         </div>
         <div class="account-strip" aria-live="polite">
-          <span id="accountName">Signed out</span>
-          <button class="text-button compact" id="logoutButton" type="button" hidden>Sign out</button>
+          <button
+            class="account-button"
+            id="authToggle"
+            type="button"
+            aria-label="Open account menu"
+            aria-controls="authPanel"
+            aria-expanded="false"
+          >
+            <span class="account-mark" aria-hidden="true"></span>
+            <span class="account-name" id="accountName">Guest</span>
+          </button>
         </div>
         <button class="icon-button" id="themeToggle" aria-label="Toggle deep forest mode" title="Theme">
           <span class="theme-mark" aria-hidden="true"></span>
         </button>
       </header>
 
-      <section class="auth-panel" id="authPanel" aria-labelledby="auth-title">
+      <section class="auth-panel" id="authPanel" aria-labelledby="auth-title" hidden>
         <div class="panel-heading">
           <div>
             <p class="section-kicker">Private diary</p>
             <h2 id="auth-title">Sign in to keep your days</h2>
           </div>
+        </div>
+
+        <div class="auth-session">
+          <p id="accountPanelName">Signed in</p>
+          <button class="secondary-button compact" id="logoutButton" type="button">Sign out</button>
         </div>
 
         <div class="auth-provider">

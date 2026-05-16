@@ -45,11 +45,14 @@ variables:
 GOOGLE_CLIENT_ID=your-client-id
 GOOGLE_CLIENT_SECRET=your-client-secret
 GOOGLE_REDIRECT_URI=https://thisdaythen.com/api/auth/google/callback
+CANONICAL_HOST=thisdaythen.com
 ```
 
 Add the same redirect URI in Google Cloud Console. If `GOOGLE_REDIRECT_URI` is
 not set, the server uses the current request origin plus
 `/api/auth/google/callback`.
+`CANONICAL_HOST` keeps `www.thisdaythen.com` and `thisdaythen.com` on the same
+host so OAuth state cookies survive the Google redirect.
 
 This version still uses local summary drafting. The server includes `/api/realtime-session`
 for OpenAI Realtime WebRTC, but real voice AI requires setting `OPENAI_API_KEY` in the

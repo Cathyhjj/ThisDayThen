@@ -10,6 +10,7 @@ const state = {
   auth: {
     user: null,
     ready: false,
+    panelOpen: false,
   },
   voice: {
     active: false,
@@ -60,8 +61,11 @@ const demoEntries = [
 const elements = {
   breathCanvas: document.querySelector("#breathCanvas"),
   authPanel: document.querySelector("#authPanel"),
+  authTitle: document.querySelector("#auth-title"),
   appContent: document.querySelector("#appContent"),
+  authToggle: document.querySelector("#authToggle"),
   accountName: document.querySelector("#accountName"),
+  accountPanelName: document.querySelector("#accountPanelName"),
   logoutButton: document.querySelector("#logoutButton"),
   loginForm: document.querySelector("#loginForm"),
   registerForm: document.querySelector("#registerForm"),
@@ -107,9 +111,12 @@ function init() {
 }
 
 function bindEvents() {
+  elements.authToggle.addEventListener("click", toggleAuthPanel);
   elements.loginForm.addEventListener("submit", (event) => handleAuthSubmit(event, "login"));
   elements.registerForm.addEventListener("submit", (event) => handleAuthSubmit(event, "register"));
   elements.logoutButton.addEventListener("click", handleLogout);
+  document.addEventListener("click", closeAuthPanelOnOutsideClick);
+  document.addEventListener("keydown", closeAuthPanelOnEscape);
 
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.addEventListener("click", () => switchView(tab.dataset.view));
@@ -160,9 +167,11 @@ async function initializeAuth() {
       await finishSignIn(data.user);
     } else {
       startGuestSession(redirectMessage || GUEST_MESSAGE, false);
+      if (redirectMessage) setAuthPanelOpen(true);
     }
   } catch (error) {
     startGuestSession(redirectMessage || GUEST_MESSAGE, false);
+    if (redirectMessage) setAuthPanelOpen(true);
   } finally {
     state.auth.ready = true;
   }
@@ -211,6 +220,7 @@ async function handleLogout() {
 
 async function finishSignIn(user) {
   state.auth.user = user;
+  setAuthPanelOpen(false);
   updateAuthUI();
   setAuthMessage("");
   await loadEntriesFromServer();
@@ -230,10 +240,44 @@ function startGuestSession(message = GUEST_MESSAGE, shouldReset = true) {
 
 function updateAuthUI() {
   const signedIn = Boolean(state.auth.user);
-  elements.authPanel.hidden = signedIn;
   elements.appContent.hidden = false;
   elements.logoutButton.hidden = !signedIn;
-  elements.accountName.textContent = signedIn ? state.auth.user.name : "Guest session";
+  elements.authPanel.dataset.signedIn = signedIn ? "true" : "false";
+  elements.authTitle.textContent = signedIn ? "Account" : "Sign in to keep your days";
+  elements.accountName.textContent = signedIn ? state.auth.user.name : "Guest";
+  elements.accountPanelName.textContent = signedIn
+    ? `Signed in as ${state.auth.user.name}`
+    : "Guest mode";
+  elements.authToggle.setAttribute(
+    "aria-label",
+    signedIn ? `Open account menu for ${state.auth.user.name}` : "Open sign in"
+  );
+  elements.authToggle.title = signedIn ? state.auth.user.email : "Sign in";
+  setAuthPanelOpen(state.auth.panelOpen);
+}
+
+function toggleAuthPanel(event) {
+  event.stopPropagation();
+  setAuthPanelOpen(!state.auth.panelOpen);
+}
+
+function setAuthPanelOpen(isOpen) {
+  state.auth.panelOpen = isOpen;
+  elements.authPanel.hidden = !isOpen;
+  elements.authToggle.setAttribute("aria-expanded", String(isOpen));
+}
+
+function closeAuthPanelOnOutsideClick(event) {
+  if (!state.auth.panelOpen) return;
+  if (elements.authPanel.contains(event.target) || elements.authToggle.contains(event.target)) return;
+  setAuthPanelOpen(false);
+}
+
+function closeAuthPanelOnEscape(event) {
+  if (event.key === "Escape" && state.auth.panelOpen) {
+    setAuthPanelOpen(false);
+    elements.authToggle.focus();
+  }
 }
 
 function setAuthMessage(message, isError = false) {

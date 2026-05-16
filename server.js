@@ -29,6 +29,12 @@ const mimeTypes = {
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host || "127.0.0.1"}`);
+    const canonicalRedirect = canonicalRedirectUrl(req, url);
+    if (canonicalRedirect) {
+      res.writeHead(308, { Location: canonicalRedirect });
+      res.end();
+      return;
+    }
 
     if (req.method === "GET" && url.pathname === "/api/auth/me") {
       const user = getAuthenticatedUser(req);
@@ -796,6 +802,20 @@ function googleRedirectUri(req) {
   return process.env.GOOGLE_REDIRECT_URI || `${requestOrigin(req)}/api/auth/google/callback`;
 }
 
+function canonicalRedirectUrl(req, url) {
+  const canonicalHost = normalizeHost(process.env.CANONICAL_HOST);
+  if (!canonicalHost) return "";
+
+  const requestHost = normalizeHost(firstHeaderValue(req.headers["x-forwarded-host"]) || req.headers.host);
+  if (requestHost !== `www.${canonicalHost}`) return "";
+
+  const protocol = firstHeaderValue(req.headers["x-forwarded-proto"]) || (isSecureRequest(req) ? "https" : "http");
+  const destination = new URL(`${protocol}://${canonicalHost}`);
+  destination.pathname = url.pathname;
+  destination.search = url.search;
+  return destination.toString();
+}
+
 function requestOrigin(req) {
   const forwardedProto = firstHeaderValue(req.headers["x-forwarded-proto"]);
   const forwardedHost = firstHeaderValue(req.headers["x-forwarded-host"]);
@@ -807,6 +827,10 @@ function requestOrigin(req) {
 function firstHeaderValue(value) {
   if (Array.isArray(value)) return value[0];
   return typeof value === "string" ? value.split(",")[0].trim() : "";
+}
+
+function normalizeHost(value = "") {
+  return String(value).trim().toLowerCase().replace(/^https?:\/\//, "").split("/")[0].split(":")[0];
 }
 
 function redirectWithAuthMessage(req, res, message) {
