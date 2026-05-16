@@ -1,5 +1,3 @@
-const STORAGE_KEY = "this-day-then.entries.v1";
-const CHAT_KEY = "this-day-then.chat.v1";
 const THEME_KEY = "this-day-then.theme.v1";
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -8,6 +6,10 @@ const state = {
   selectedDate: toDateInputValue(new Date()),
   entries: loadEntries(),
   chat: loadChat(),
+  auth: {
+    user: null,
+    ready: false,
+  },
   voice: {
     active: false,
     listening: false,
@@ -56,6 +58,13 @@ const demoEntries = [
 
 const elements = {
   breathCanvas: document.querySelector("#breathCanvas"),
+  authPanel: document.querySelector("#authPanel"),
+  appContent: document.querySelector("#appContent"),
+  accountName: document.querySelector("#accountName"),
+  logoutButton: document.querySelector("#logoutButton"),
+  loginForm: document.querySelector("#loginForm"),
+  registerForm: document.querySelector("#registerForm"),
+  authMessage: document.querySelector("#authMessage"),
   dateInput: document.querySelector("#dateInput"),
   dateHeading: document.querySelector("#date-heading"),
   messages: document.querySelector("#messages"),
@@ -90,14 +99,17 @@ function init() {
     document.documentElement.dataset.theme = "night";
   }
 
-  ensureChatForDate();
   bindEvents();
-  render();
   startBreathCanvas();
   checkVoiceMode();
+  initializeAuth();
 }
 
 function bindEvents() {
+  elements.loginForm.addEventListener("submit", (event) => handleAuthSubmit(event, "login"));
+  elements.registerForm.addEventListener("submit", (event) => handleAuthSubmit(event, "register"));
+  elements.logoutButton.addEventListener("click", handleLogout);
+
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.addEventListener("click", () => switchView(tab.dataset.view));
   });
@@ -136,6 +148,103 @@ function bindEvents() {
   elements.seedDemoData.addEventListener("click", addDemoMemories);
   elements.timelineSeedDemoData.addEventListener("click", addDemoMemories);
   elements.themeToggle.addEventListener("click", toggleTheme);
+}
+
+async function initializeAuth() {
+  setAuthMessage("Checking your session...");
+  try {
+    const data = await apiFetch("/api/auth/me");
+    if (data.user) {
+      await finishSignIn(data.user);
+    } else {
+      showSignedOut("");
+    }
+  } catch (error) {
+    showSignedOut("Sign in to save entries on this device.");
+  } finally {
+    state.auth.ready = true;
+  }
+}
+
+async function handleAuthSubmit(event, mode) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const submitButton = form.querySelector("button[type='submit']");
+  const endpoint = mode === "register" ? "/api/auth/register" : "/api/auth/login";
+  const pendingText = mode === "register" ? "Creating account..." : "Logging in...";
+
+  submitButton.disabled = true;
+  setAuthMessage(pendingText);
+
+  try {
+    const payload = Object.fromEntries(new FormData(form));
+    const data = await apiFetch(endpoint, {
+      method: "POST",
+      body: payload,
+    });
+    form.reset();
+    await finishSignIn(data.user);
+  } catch (error) {
+    setAuthMessage(error.message || "Something went wrong.", true);
+  } finally {
+    submitButton.disabled = false;
+  }
+}
+
+async function handleLogout() {
+  elements.logoutButton.disabled = true;
+  stopVoiceSession();
+
+  try {
+    await apiFetch("/api/auth/logout", { method: "POST" });
+  } catch (error) {
+    console.warn("Logout request failed.", error);
+  } finally {
+    state.entries = {};
+    state.chat = {};
+    showSignedOut("Signed out.");
+    elements.logoutButton.disabled = false;
+  }
+}
+
+async function finishSignIn(user) {
+  state.auth.user = user;
+  updateAuthUI();
+  setAuthMessage("");
+  await loadEntriesFromServer();
+}
+
+function showSignedOut(message) {
+  state.auth.user = null;
+  state.entries = {};
+  state.chat = {};
+  updateAuthUI();
+  setAuthMessage(message);
+}
+
+function updateAuthUI() {
+  const signedIn = Boolean(state.auth.user);
+  elements.authPanel.hidden = signedIn;
+  elements.appContent.hidden = !signedIn;
+  elements.logoutButton.hidden = !signedIn;
+  elements.accountName.textContent = signedIn ? state.auth.user.name : "Signed out";
+}
+
+function setAuthMessage(message, isError = false) {
+  elements.authMessage.textContent = message;
+  elements.authMessage.dataset.status = isError ? "error" : "info";
+}
+
+async function loadEntriesFromServer() {
+  const data = await apiFetch("/api/entries");
+  const entries = Array.isArray(data.entries) ? data.entries : [];
+  state.entries = entriesToMap(entries);
+  state.chat = entries.reduce((chat, entry) => {
+    chat[entry.date] = Array.isArray(entry.conversation) ? entry.conversation : [];
+    return chat;
+  }, {});
+  ensureChatForDate();
+  render();
 }
 
 function switchView(viewName) {
@@ -714,22 +823,38 @@ function draftSummary(isRegeneration = false) {
   elements.summaryEditor.value = lines.join("\n");
 }
 
-function saveSummary() {
+async function saveSummary() {
+  if (!state.auth.user) {
+    showSignedOut("Sign in before saving a diary entry.");
+    return;
+  }
+
   const summary = normalizeFiveLines(elements.summaryEditor.value);
   if (!summary) return;
 
-  state.entries[state.selectedDate] = {
+  const draftEntry = {
     date: state.selectedDate,
     summary,
     conversation: currentChat(),
     updatedAt: new Date().toISOString(),
   };
 
-  persistEntries();
-  elements.summaryEditor.value = summary;
-  renderYearStack();
-  renderArchive();
-  flashButton(elements.saveSummary, "Saved");
+  elements.saveSummary.disabled = true;
+
+  try {
+    const savedEntry = await saveEntryToServer(draftEntry);
+    state.entries[savedEntry.date] = savedEntry;
+    state.chat[savedEntry.date] = savedEntry.conversation || [];
+    elements.summaryEditor.value = savedEntry.summary;
+    renderYearStack();
+    renderArchive();
+    flashButton(elements.saveSummary, "Saved");
+  } catch (error) {
+    setAuthMessage(error.message || "Could not save this entry.", true);
+    flashButton(elements.saveSummary, "Try again");
+  } finally {
+    elements.saveSummary.disabled = false;
+  }
 }
 
 function resetChat() {
@@ -741,25 +866,42 @@ function resetChat() {
   updateVoiceUI("idle", "Ready when you are");
 }
 
-function addDemoMemories() {
+async function addDemoMemories() {
+  if (!state.auth.user) {
+    showSignedOut("Sign in before adding sample diary entries.");
+    return;
+  }
+
   const selected = parseLocalDate(state.selectedDate);
   const month = selected.getMonth();
   const day = selected.getDate();
   const selectedYear = selected.getFullYear();
+  const drafts = [];
 
   demoEntries.forEach((entry, index) => {
     const date = toDateInputValue(new Date(selectedYear - index - 1, month, day));
     if (!state.entries[date]) {
-      state.entries[date] = {
+      drafts.push({
         ...entry,
         date,
         updatedAt: new Date(selectedYear - index - 1, month, day, 21, 12).toISOString(),
-      };
+      });
     }
   });
-  persistEntries();
-  render();
-  switchView("timeline");
+
+  try {
+    await Promise.all(
+      drafts.map(async (draft) => {
+        const savedEntry = await saveEntryToServer(draft);
+        state.entries[savedEntry.date] = savedEntry;
+        state.chat[savedEntry.date] = savedEntry.conversation || [];
+      })
+    );
+    render();
+    switchView("timeline");
+  } catch (error) {
+    setAuthMessage(error.message || "Could not add sample entries.", true);
+  }
 }
 
 function toggleTheme() {
@@ -771,7 +913,6 @@ function toggleTheme() {
 function ensureChatForDate() {
   if (!state.chat[state.selectedDate]) {
     state.chat[state.selectedDate] = [];
-    persistChat();
   }
 }
 
@@ -1089,27 +1230,64 @@ function startBreathCanvas() {
 }
 
 function loadEntries() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
-  } catch {
-    return {};
-  }
+  return {};
 }
 
 function loadChat() {
-  try {
-    return JSON.parse(localStorage.getItem(CHAT_KEY)) || {};
-  } catch {
-    return {};
-  }
+  return {};
 }
 
 function persistEntries() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.entries));
+  return Promise.resolve();
 }
 
 function persistChat() {
-  localStorage.setItem(CHAT_KEY, JSON.stringify(state.chat));
+  return Promise.resolve();
+}
+
+function entriesToMap(entries) {
+  return entries.reduce((mapped, entry) => {
+    mapped[entry.date] = entry;
+    return mapped;
+  }, {});
+}
+
+async function saveEntryToServer(entry) {
+  const data = await apiFetch("/api/entries", {
+    method: "POST",
+    body: {
+      date: entry.date,
+      summary: entry.summary,
+      conversation: entry.conversation || [],
+    },
+  });
+  return data.entry;
+}
+
+async function apiFetch(url, options = {}) {
+  const headers = new Headers(options.headers || {});
+  const requestOptions = {
+    ...options,
+    headers,
+    credentials: "same-origin",
+  };
+
+  if (options.body && typeof options.body !== "string" && !(options.body instanceof FormData)) {
+    headers.set("Content-Type", "application/json");
+    requestOptions.body = JSON.stringify(options.body);
+  }
+
+  const response = await fetch(url, requestOptions);
+  const contentType = response.headers.get("content-type") || "";
+  const data = contentType.includes("application/json") ? await response.json() : await response.text();
+
+  if (!response.ok) {
+    const message =
+      data && typeof data === "object" && "error" in data ? data.error : "Request failed.";
+    throw new Error(message);
+  }
+
+  return data;
 }
 
 function flashButton(button, text) {

@@ -2,7 +2,7 @@
 
 A first demo for a calm five-line journal.
 
-The prototype is intentionally static so the product feeling can be tested quickly before adding a backend or native iOS app.
+The prototype now includes a small built-in backend for private accounts and saved diary entries.
 
 ## What works
 
@@ -11,7 +11,8 @@ The prototype is intentionally static so the product feeling can be tested quick
 - Browser demo live voice mode with speech recognition/synthesis where supported
 - Green meditative design with a breathing canvas background
 - Drafts a five-line memory from the conversation
-- Saves entries in local storage
+- Creates accounts, logs users in with HttpOnly cookie sessions, and saves entries per user
+- Stores diary data in a local JSON database
 - Shows the selected date across five years
 - Adds sample same-date memories for demoing comparison
 - Light and soft dark themes
@@ -25,6 +26,13 @@ npm start
 ```
 
 Then open `http://127.0.0.1:3000`.
+
+By default the app writes its database to `data/this-day-then-db.json`. To use a
+different database path, set:
+
+```sh
+DIARY_DB_PATH=/absolute/path/diary-db.json npm start
+```
 
 This version still uses local summary drafting. The server includes `/api/realtime-session`
 for OpenAI Realtime WebRTC, but real voice AI requires setting `OPENAI_API_KEY` in the

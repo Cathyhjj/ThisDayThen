@@ -24,122 +24,184 @@
           <p class="eyebrow">This Day Then</p>
           <h1>This day, then</h1>
         </div>
+        <div class="account-strip" aria-live="polite">
+          <span id="accountName">Signed out</span>
+          <button class="text-button compact" id="logoutButton" type="button" hidden>Sign out</button>
+        </div>
         <button class="icon-button" id="themeToggle" aria-label="Toggle deep forest mode" title="Theme">
           <span class="theme-mark" aria-hidden="true"></span>
         </button>
       </header>
 
-      <section class="date-band" aria-labelledby="date-heading">
-        <div>
-          <p class="section-kicker">Selected date</p>
-          <h2 id="date-heading">Today</h2>
+      <section class="auth-panel" id="authPanel" aria-labelledby="auth-title">
+        <div class="panel-heading">
+          <div>
+            <p class="section-kicker">Private diary</p>
+            <h2 id="auth-title">Sign in to keep your days</h2>
+          </div>
         </div>
-        <label class="date-picker">
-          <span>Date</span>
-          <input id="dateInput" type="date" />
-        </label>
-      </section>
 
-      <nav class="tabs" aria-label="Main views">
-        <button class="tab is-active" data-view="checkin">Check-in</button>
-        <button class="tab" data-view="timeline">Five years</button>
-        <button class="tab" data-view="archive">Archive</button>
-      </nav>
-
-      <section class="view is-visible" id="checkinView" aria-labelledby="checkin-title">
-        <div class="conversation-panel audio-panel">
-          <div class="panel-heading">
+        <div class="auth-grid">
+          <form class="auth-form" id="loginForm">
             <div>
-              <p class="section-kicker">Live voice</p>
-              <h2 id="checkin-title">A quiet conversation</h2>
+              <p class="section-kicker">Welcome back</p>
+              <h3>Log in</h3>
             </div>
-            <button class="text-button" id="resetChat">Begin again</button>
-          </div>
+            <label>
+              <span>Email</span>
+              <input id="loginEmail" name="email" type="email" autocomplete="email" required />
+            </label>
+            <label>
+              <span>Password</span>
+              <input id="loginPassword" name="password" type="password" autocomplete="current-password" required />
+            </label>
+            <button class="primary-button" type="submit">Log in</button>
+          </form>
 
-          <div class="voice-stage" data-voice-state="idle">
-            <button class="voice-orb" id="voiceOrb" type="button" aria-label="Start live audio check-in">
-              <span class="orb-ring ring-one"></span>
-              <span class="orb-ring ring-two"></span>
-              <span class="orb-ring ring-three"></span>
-              <span class="orb-core">
-                <span class="orb-symbol" aria-hidden="true"></span>
-              </span>
-            </button>
-            <div class="voice-status">
-              <p class="voice-state" id="voiceState">Ready when you are</p>
-              <p class="voice-hint" id="voiceHint">Tap the orb and speak naturally. She will listen, pause, and ask the next gentle question.</p>
+          <form class="auth-form" id="registerForm">
+            <div>
+              <p class="section-kicker">New here</p>
+              <h3>Create account</h3>
             </div>
-          </div>
-
-          <div class="voice-controls">
-            <button class="primary-button" id="startVoice" type="button">Start live voice</button>
-            <button class="secondary-button" id="finishVoice" type="button">Finish and draft</button>
-          </div>
-
-          <div class="sound-bars" id="soundBars" aria-hidden="true">
-            <span></span>
-            <span></span>
-            <span></span>
-            <span></span>
-            <span></span>
-            <span></span>
-            <span></span>
-          </div>
-
-          <div class="transcript-pocket">
-            <button class="text-button" id="toggleTranscript" type="button">Show quiet transcript</button>
-            <div class="messages" id="messages" aria-live="polite" hidden></div>
-          </div>
-
-          <form class="composer sr-only" id="composer">
-            <label for="messageInput">Reply to your daily friend</label>
-            <textarea id="messageInput" rows="3"></textarea>
-            <button type="submit">Send</button>
+            <label>
+              <span>Name</span>
+              <input id="registerName" name="name" type="text" autocomplete="name" required />
+            </label>
+            <label>
+              <span>Email</span>
+              <input id="registerEmail" name="email" type="email" autocomplete="email" required />
+            </label>
+            <label>
+              <span>Password</span>
+              <input
+                id="registerPassword"
+                name="password"
+                type="password"
+                autocomplete="new-password"
+                minlength="8"
+                required
+              />
+            </label>
+            <button class="secondary-button" type="submit">Create account</button>
           </form>
         </div>
 
-        <div class="summary-panel">
-          <div class="panel-heading">
-            <div>
-              <p class="section-kicker">Five lines</p>
-              <h2>Today's memory</h2>
+        <p class="auth-message" id="authMessage" role="status"></p>
+      </section>
+
+      <div class="app-content" id="appContent" hidden>
+        <section class="date-band" aria-labelledby="date-heading">
+          <div>
+            <p class="section-kicker">Selected date</p>
+            <h2 id="date-heading">Today</h2>
+          </div>
+          <label class="date-picker">
+            <span>Date</span>
+            <input id="dateInput" type="date" />
+          </label>
+        </section>
+
+        <nav class="tabs" aria-label="Main views">
+          <button class="tab is-active" data-view="checkin">Check-in</button>
+          <button class="tab" data-view="timeline">Five years</button>
+          <button class="tab" data-view="archive">Archive</button>
+        </nav>
+
+        <section class="view is-visible" id="checkinView" aria-labelledby="checkin-title">
+          <div class="conversation-panel audio-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="section-kicker">Live voice</p>
+                <h2 id="checkin-title">A quiet conversation</h2>
+              </div>
+              <button class="text-button" id="resetChat">Begin again</button>
             </div>
-            <button class="text-button" id="generateSummary">Draft</button>
-          </div>
-          <textarea id="summaryEditor" class="summary-editor" rows="8" placeholder="Your five-line summary will appear here."></textarea>
-          <div class="summary-actions">
-            <button class="secondary-button" id="regenerateSummary" type="button">Regenerate</button>
-            <button class="primary-button" id="saveSummary" type="button">Save five lines</button>
-          </div>
-        </div>
-      </section>
 
-      <section class="view" id="timelineView" aria-labelledby="timeline-title">
-        <div class="timeline-heading">
-          <div>
-            <p class="section-kicker">Same date</p>
-            <h2 id="timeline-title">Five years together</h2>
-          </div>
-          <div class="heading-actions">
-            <button class="secondary-button compact" id="timelineSeedDemoData">Sample years</button>
-            <button class="primary-button compact" id="compareYears">Reflect</button>
-          </div>
-        </div>
+            <div class="voice-stage" data-voice-state="idle">
+              <button class="voice-orb" id="voiceOrb" type="button" aria-label="Start live audio check-in">
+                <span class="orb-ring ring-one"></span>
+                <span class="orb-ring ring-two"></span>
+                <span class="orb-ring ring-three"></span>
+                <span class="orb-core">
+                  <span class="orb-symbol" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div class="voice-status">
+                <p class="voice-state" id="voiceState">Ready when you are</p>
+                <p class="voice-hint" id="voiceHint">Tap the orb and speak naturally. She will listen, pause, and ask the next gentle question.</p>
+              </div>
+            </div>
 
-        <div class="year-stack" id="yearStack"></div>
-        <aside class="reflection" id="reflectionBox" hidden></aside>
-      </section>
+            <div class="voice-controls">
+              <button class="primary-button" id="startVoice" type="button">Start live voice</button>
+              <button class="secondary-button" id="finishVoice" type="button">Finish and draft</button>
+            </div>
 
-      <section class="view" id="archiveView" aria-labelledby="archive-title">
-        <div class="timeline-heading">
-          <div>
-            <p class="section-kicker">Archive</p>
-            <h2 id="archive-title">Saved days</h2>
+            <div class="sound-bars" id="soundBars" aria-hidden="true">
+              <span></span>
+              <span></span>
+              <span></span>
+              <span></span>
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+
+            <div class="transcript-pocket">
+              <button class="text-button" id="toggleTranscript" type="button">Show quiet transcript</button>
+              <div class="messages" id="messages" aria-live="polite" hidden></div>
+            </div>
+
+            <form class="composer sr-only" id="composer">
+              <label for="messageInput">Reply to your daily friend</label>
+              <textarea id="messageInput" rows="3"></textarea>
+              <button type="submit">Send</button>
+            </form>
           </div>
-          <button class="secondary-button compact" id="seedDemoData">Add demo memories</button>
-        </div>
-        <div class="archive-list" id="archiveList"></div>
-      </section>
+
+          <div class="summary-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="section-kicker">Five lines</p>
+                <h2>Today's memory</h2>
+              </div>
+              <button class="text-button" id="generateSummary">Draft</button>
+            </div>
+            <textarea id="summaryEditor" class="summary-editor" rows="8" placeholder="Your five-line summary will appear here."></textarea>
+            <div class="summary-actions">
+              <button class="secondary-button" id="regenerateSummary" type="button">Regenerate</button>
+              <button class="primary-button" id="saveSummary" type="button">Save five lines</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="view" id="timelineView" aria-labelledby="timeline-title">
+          <div class="timeline-heading">
+            <div>
+              <p class="section-kicker">Same date</p>
+              <h2 id="timeline-title">Five years together</h2>
+            </div>
+            <div class="heading-actions">
+              <button class="secondary-button compact" id="timelineSeedDemoData">Sample years</button>
+              <button class="primary-button compact" id="compareYears">Reflect</button>
+            </div>
+          </div>
+
+          <div class="year-stack" id="yearStack"></div>
+          <aside class="reflection" id="reflectionBox" hidden></aside>
+        </section>
+
+        <section class="view" id="archiveView" aria-labelledby="archive-title">
+          <div class="timeline-heading">
+            <div>
+              <p class="section-kicker">Archive</p>
+              <h2 id="archive-title">Saved days</h2>
+            </div>
+            <button class="secondary-button compact" id="seedDemoData">Add demo memories</button>
+          </div>
+          <div class="archive-list" id="archiveList"></div>
+        </section>
+      </div>
     </main>
 
     <script src="this-day-then.js"></script>
