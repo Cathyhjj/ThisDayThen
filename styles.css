@@ -374,6 +374,35 @@ h3 {
   color: #a84332;
 }
 
+.developer-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 14px;
+  margin: 18px auto 8px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.developer-footer a {
+  color: var(--moss);
+  text-decoration: none;
+}
+
+.developer-footer a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.developer-footer span,
+.developer-footer a {
+  overflow-wrap: anywhere;
+}
+
 .icon-button {
   position: absolute;
   top: 18px;
