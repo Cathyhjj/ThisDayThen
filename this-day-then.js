@@ -16,6 +16,9 @@ const state = {
     mode: "browser-demo",
     transcriptVisible: false,
     realtime: null,
+    localAudio: null,
+    localAudioUrl: "",
+    ttsController: null,
   },
 };
 
@@ -251,7 +254,10 @@ async function checkVoiceMode() {
     if (!response.ok) return;
     const data = await response.json();
     state.voice.mode = data.mode || "browser-demo";
-    if (data.realtimeReady) {
+    if (state.voice.mode === "local-tts") {
+      elements.voiceHint.textContent =
+        "Local AI voice is configured. Tap the orb to begin a more natural check-in.";
+    } else if (data.realtimeReady) {
       elements.voiceHint.textContent =
         "Realtime voice is configured. Tap the orb to begin a live audio check-in.";
     }
@@ -283,6 +289,9 @@ function stopVoiceSession() {
   state.voice.active = false;
   state.voice.listening = false;
   state.voice.speaking = false;
+  state.voice.ttsController?.abort();
+  state.voice.ttsController = null;
+  cleanupLocalAudio();
   window.speechSynthesis?.cancel();
   if (state.voice.recognition) {
     state.voice.recognition.onend = null;
@@ -292,13 +301,78 @@ function stopVoiceSession() {
   stopRealtimeVoiceSession();
 }
 
-function speakBot(text) {
+async function speakBot(text) {
   pushMessage("bot", text);
   updateVoiceUI("speaking", "She is speaking");
+  state.voice.speaking = true;
 
+  if (state.voice.mode === "local-tts") {
+    updateVoiceUI("thinking", "Shaping her voice");
+    const localVoiceHandled = await speakWithLocalTts(text);
+    if (localVoiceHandled) {
+      return;
+    }
+    updateVoiceUI("speaking", "She is speaking");
+  }
+
+  speakWithBrowserVoice(text);
+}
+
+async function speakWithLocalTts(text) {
+  const controller = new AbortController();
+  state.voice.ttsController = controller;
+
+  try {
+    const response = await fetch("/api/local-tts", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ text }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+
+    const audioBlob = await response.blob();
+    if (!state.voice.active || controller.signal.aborted) {
+      return true;
+    }
+
+    cleanupLocalAudio();
+    const audioUrl = URL.createObjectURL(audioBlob);
+    const audio = new Audio(audioUrl);
+    audio.setAttribute("playsinline", "true");
+    state.voice.localAudio = audio;
+    state.voice.localAudioUrl = audioUrl;
+
+    audio.onended = finishBotSpeech;
+    audio.onerror = () => {
+      cleanupLocalAudio();
+      speakWithBrowserVoice(text);
+    };
+
+    updateVoiceUI("speaking", "She is speaking");
+    await audio.play();
+    return true;
+  } catch (error) {
+    if (error.name !== "AbortError") {
+      console.warn("Local TTS failed, falling back to browser voice.", error);
+      state.voice.mode = "browser-demo";
+    }
+    return error.name === "AbortError";
+  } finally {
+    if (state.voice.ttsController === controller) {
+      state.voice.ttsController = null;
+    }
+  }
+}
+
+function speakWithBrowserVoice(text) {
   if (!("speechSynthesis" in window)) {
-    updateVoiceUI("listening", "Listening");
-    startListening();
+    finishBotSpeech();
     return;
   }
 
@@ -314,22 +388,36 @@ function speakBot(text) {
   if (preferredVoice) utterance.voice = preferredVoice;
 
   utterance.onend = () => {
-    state.voice.speaking = false;
-    if (state.voice.active) {
-      updateVoiceUI("listening", "Listening");
-      startListening();
-    }
+    finishBotSpeech();
   };
 
   utterance.onerror = () => {
-    if (state.voice.active) {
-      updateVoiceUI("listening", "Listening");
-      startListening();
-    }
+    finishBotSpeech();
   };
 
   state.voice.speaking = true;
   window.speechSynthesis.speak(utterance);
+}
+
+function finishBotSpeech() {
+  state.voice.speaking = false;
+  cleanupLocalAudio();
+  if (state.voice.active) {
+    updateVoiceUI("listening", "Listening");
+    startListening();
+  }
+}
+
+function cleanupLocalAudio() {
+  if (state.voice.localAudio) {
+    state.voice.localAudio.pause();
+    state.voice.localAudio.src = "";
+    state.voice.localAudio = null;
+  }
+  if (state.voice.localAudioUrl) {
+    URL.revokeObjectURL(state.voice.localAudioUrl);
+    state.voice.localAudioUrl = "";
+  }
 }
 
 function startListening() {

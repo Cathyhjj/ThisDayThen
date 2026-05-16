@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const port = process.env.PORT || 3000;
+const localTtsUrl = process.env.LOCAL_TTS_URL || "";
 
 const mimeTypes = {
   ".css": "text/css; charset=utf-8",
@@ -21,10 +22,18 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
 
     if (req.method === "GET" && url.pathname === "/api/voice-status") {
+      const realtimeReady = Boolean(process.env.OPENAI_API_KEY);
+      const localTtsReady = Boolean(localTtsUrl);
       sendJson(res, 200, {
-        realtimeReady: Boolean(process.env.OPENAI_API_KEY),
-        mode: process.env.OPENAI_API_KEY ? "openai-realtime" : "browser-demo",
+        localTtsReady,
+        realtimeReady,
+        mode: preferredVoiceMode({ localTtsReady, realtimeReady }),
       });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/local-tts") {
+      await handleLocalTts(req, res);
       return;
     }
 
@@ -98,6 +107,80 @@ async function handleRealtimeSession(req, res) {
     "Content-Type": response.ok ? "application/sdp" : "text/plain; charset=utf-8",
   });
   res.end(body);
+}
+
+async function handleLocalTts(req, res) {
+  if (!localTtsUrl) {
+    sendJson(res, 503, {
+      error: "LOCAL_TTS_URL is not configured. Browser demo voice mode is still available.",
+    });
+    return;
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(await readBody(req));
+  } catch {
+    sendJson(res, 400, { error: "Expected a JSON body." });
+    return;
+  }
+
+  const text = typeof payload.text === "string" ? payload.text.trim() : "";
+  if (!text) {
+    sendJson(res, 400, { error: "Text is required." });
+    return;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    Number(process.env.LOCAL_TTS_TIMEOUT_MS || 45000)
+  );
+
+  try {
+    const response = await fetch(localTtsUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        text,
+        reference_audio: process.env.LOCAL_TTS_REFERENCE_AUDIO || "",
+        voice: process.env.LOCAL_TTS_VOICE || "warm",
+        exaggeration: Number(process.env.LOCAL_TTS_EXAGGERATION || 0.45),
+      }),
+      signal: controller.signal,
+    });
+
+    const body = Buffer.from(await response.arrayBuffer());
+    if (!response.ok) {
+      sendText(res, response.status, body.toString("utf8") || "Local TTS failed.");
+      return;
+    }
+
+    res.writeHead(200, {
+      "Content-Type": response.headers.get("content-type") || "audio/wav",
+      "Cache-Control": "no-store",
+    });
+    res.end(body);
+  } catch (error) {
+    const message =
+      error.name === "AbortError"
+        ? "Local TTS timed out."
+        : "Local TTS is not reachable. Browser demo voice mode is still available.";
+    sendJson(res, 502, { error: message });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function preferredVoiceMode({ localTtsReady, realtimeReady }) {
+  if (process.env.VOICE_MODE === "browser-demo") return "browser-demo";
+  if (process.env.VOICE_MODE === "openai-realtime" && realtimeReady) return "openai-realtime";
+  if (process.env.VOICE_MODE === "local-tts" && localTtsReady) return "local-tts";
+  if (localTtsReady) return "local-tts";
+  if (realtimeReady) return "openai-realtime";
+  return "browser-demo";
 }
 
 function serveStatic(pathname, res, isHead) {

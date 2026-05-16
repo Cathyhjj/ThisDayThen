@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
+    "start:local-tts": "LOCAL_TTS_URL=http://127.0.0.1:7861/synthesize VOICE_MODE=local-tts node server.js",
     "check": "node --check this-day-then.js && node --check server.js"
   },
   "engines": {
