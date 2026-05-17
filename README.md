@@ -69,9 +69,18 @@ EMAIL_FROM="This Day Then <hello@thisdaythen.com>"
 testing only, set `EMAIL_DEV_MODE=1`; the server will print and return the code
 instead of sending an email.
 
-This version still uses local summary drafting. The server includes `/api/realtime-session`
-for OpenAI Realtime WebRTC, but real voice AI requires setting `OPENAI_API_KEY` in the
-Render environment.
+This version still uses local summary drafting. When `OPENAI_API_KEY` is configured,
+voice prompts use OpenAI speech generation with the `fable` voice and a warm
+Eternal Optimist-style delivery. The server also includes `/api/realtime-session`
+for OpenAI Realtime WebRTC if `VOICE_MODE=openai-realtime` is set.
+
+Useful OpenAI voice knobs:
+
+- `OPENAI_API_KEY` - enables OpenAI voice generation
+- `VOICE_MODE=openai-tts` - prefer OpenAI speech generation, the default when a key is configured
+- `OPENAI_TTS_MODEL=gpt-4o-mini-tts` - speech generation model
+- `OPENAI_TTS_VOICE=fable` - selected voice
+- `OPENAI_REALTIME_MODEL=gpt-realtime-2` - model used when `VOICE_MODE=openai-realtime`
 
 ## Natural local voice
 
@@ -104,6 +113,6 @@ CHATTERBOX_REFERENCE_AUDIO=/absolute/path/reference.wav python local_tts/chatter
 Useful knobs:
 
 - `LOCAL_TTS_URL` - local synthesis endpoint, defaults in `start:local-tts` to Chatterbox
-- `VOICE_MODE=local-tts` - prefer local TTS over OpenAI Realtime when both are configured
+- `VOICE_MODE=local-tts` - force local TTS when Chatterbox is configured
 - `LOCAL_TTS_EXAGGERATION=0.45` - emotion intensity sent to Chatterbox
 - `CHATTERBOX_DEVICE=cuda|mps|cpu` - force the model device

@@ -484,12 +484,18 @@ async function checkVoiceMode() {
     if (!response.ok) return;
     const data = await response.json();
     state.voice.mode = data.mode || "browser-demo";
-    if (state.voice.mode === "local-tts") {
+    if (state.voice.mode === "openai-tts") {
+      elements.voiceHint.textContent =
+        "Fable voice is configured. Tap the orb to begin a warmer check-in.";
+    } else if (state.voice.mode === "local-tts") {
       elements.voiceHint.textContent =
         "Local AI voice is configured. Tap the orb to begin a more natural check-in.";
-    } else if (data.realtimeReady) {
+    } else if (state.voice.mode === "openai-realtime") {
       elements.voiceHint.textContent =
         "Realtime voice is configured. Tap the orb to begin a live audio check-in.";
+    }
+    if (!state.voice.active) {
+      updateVoiceUI("idle");
     }
   } catch {
     state.voice.mode = "browser-demo";
@@ -536,6 +542,15 @@ async function speakBot(text) {
   updateVoiceUI("speaking", "She is speaking");
   state.voice.speaking = true;
 
+  if (state.voice.mode === "openai-tts") {
+    updateVoiceUI("thinking", "Warming her voice");
+    const openAiVoiceHandled = await speakWithOpenAiTts(text);
+    if (openAiVoiceHandled) {
+      return;
+    }
+    updateVoiceUI("speaking", "She is speaking");
+  }
+
   if (state.voice.mode === "local-tts") {
     updateVoiceUI("thinking", "Shaping her voice");
     const localVoiceHandled = await speakWithLocalTts(text);
@@ -546,6 +561,58 @@ async function speakBot(text) {
   }
 
   speakWithBrowserVoice(text);
+}
+
+async function speakWithOpenAiTts(text) {
+  const controller = new AbortController();
+  state.voice.ttsController = controller;
+
+  try {
+    const response = await fetch("/api/openai-tts", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ text }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+
+    const audioBlob = await response.blob();
+    if (!state.voice.active || controller.signal.aborted) {
+      return true;
+    }
+
+    cleanupLocalAudio();
+    const audioUrl = URL.createObjectURL(audioBlob);
+    const audio = new Audio(audioUrl);
+    audio.setAttribute("playsinline", "true");
+    state.voice.localAudio = audio;
+    state.voice.localAudioUrl = audioUrl;
+
+    audio.onended = finishBotSpeech;
+    audio.onerror = () => {
+      cleanupLocalAudio();
+      speakWithBrowserVoice(text);
+    };
+
+    updateVoiceUI("speaking", "She is speaking");
+    await audio.play();
+    return true;
+  } catch (error) {
+    if (error.name !== "AbortError") {
+      console.warn("OpenAI TTS failed, falling back to browser voice.", error);
+      state.voice.mode = "browser-demo";
+    }
+    return error.name === "AbortError";
+  } finally {
+    if (state.voice.ttsController === controller) {
+      state.voice.ttsController = null;
+    }
+  }
 }
 
 async function speakWithLocalTts(text) {
@@ -883,9 +950,22 @@ function updateVoiceUI(status, label, hint) {
   elements.voiceHint.textContent =
     hint ||
     (status === "idle"
-      ? "Tap the orb and speak naturally. She will listen, pause, and ask the next gentle question."
+      ? idleVoiceHint()
       : "No transcript is shown while you speak. The day is gathered quietly in the background.");
   elements.startVoice.textContent = state.voice.active ? "Live voice is open" : "Start live voice";
+}
+
+function idleVoiceHint() {
+  if (state.voice.mode === "openai-tts") {
+    return "Fable voice is configured. Tap the orb to begin a warmer check-in.";
+  }
+  if (state.voice.mode === "local-tts") {
+    return "Local AI voice is configured. Tap the orb to begin a more natural check-in.";
+  }
+  if (state.voice.mode === "openai-realtime") {
+    return "Realtime voice is configured. Tap the orb to begin a live audio check-in.";
+  }
+  return "Tap the orb and speak naturally. She will listen, pause, and ask the next gentle question.";
 }
 
 function toggleTranscript() {

@@ -19,6 +19,16 @@ services:
         sync: false
       - key: EMAIL_FROM
         sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: VOICE_MODE
+        value: openai-tts
+      - key: OPENAI_TTS_MODEL
+        value: gpt-4o-mini-tts
+      - key: OPENAI_TTS_VOICE
+        value: fable
+      - key: OPENAI_REALTIME_MODEL
+        value: gpt-realtime-2
     domains:
       - thisdaythen.com
       - www.thisdaythen.com

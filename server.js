@@ -6,7 +6,15 @@ import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+loadLocalEnv();
+
 const port = process.env.PORT || 3000;
+const openAiApiKey = process.env.OPENAI_API_KEY || "";
+const openAiTtsModel = process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts";
+const openAiTtsVoice = process.env.OPENAI_TTS_VOICE || "fable";
+const openAiTtsInstructions =
+  process.env.OPENAI_TTS_INSTRUCTIONS ||
+  "Voice: warm, bright, and reassuring, like an optimistic friend checking in at the end of the day. Tone: encouraging and emotionally present without sounding theatrical, salesy, or over-polished. Delivery: natural pauses, clear phrasing, gentle lift, and steady confidence. Keep it intimate, unhurried, and human.";
 const localTtsUrl = process.env.LOCAL_TTS_URL || "";
 const databasePath = process.env.DIARY_DB_PATH
   ? path.resolve(process.env.DIARY_DB_PATH)
@@ -19,6 +27,33 @@ const maxRegistrationCodeAttempts = 5;
 const maxJsonBytes = 1024 * 1024;
 const database = loadDatabase();
 let googleJwksCache = { expiresAt: 0, keys: [] };
+
+function loadLocalEnv() {
+  for (const filename of [".env", ".env.local"]) {
+    const envPath = path.join(__dirname, filename);
+    if (!fs.existsSync(envPath)) continue;
+
+    const lines = fs.readFileSync(envPath, "utf8").split(/\r?\n/);
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+
+      const equalsIndex = trimmed.indexOf("=");
+      if (equalsIndex === -1) continue;
+
+      const key = trimmed.slice(0, equalsIndex).trim();
+      if (!key || process.env[key]) continue;
+
+      let value = trimmed.slice(equalsIndex + 1).trim();
+      const quote = value[0];
+      if ((quote === "\"" || quote === "'") && value.endsWith(quote)) {
+        value = value.slice(1, -1);
+      }
+
+      process.env[key] = value;
+    }
+  }
+}
 
 const mimeTypes = {
   ".css": "text/css; charset=utf-8",
@@ -89,13 +124,20 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && url.pathname === "/api/voice-status") {
-      const realtimeReady = Boolean(process.env.OPENAI_API_KEY);
+      const openAiTtsReady = Boolean(openAiApiKey);
+      const realtimeReady = Boolean(openAiApiKey);
       const localTtsReady = Boolean(localTtsUrl);
       sendJson(res, 200, {
         localTtsReady,
+        openAiTtsReady,
         realtimeReady,
-        mode: preferredVoiceMode({ localTtsReady, realtimeReady }),
+        mode: preferredVoiceMode({ localTtsReady, openAiTtsReady, realtimeReady }),
       });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/openai-tts") {
+      await handleOpenAiTts(req, res);
       return;
     }
 
@@ -547,7 +589,7 @@ async function handleSaveEntry(req, res) {
 }
 
 async function handleRealtimeSession(req, res) {
-  if (!process.env.OPENAI_API_KEY) {
+  if (!openAiApiKey) {
     sendJson(res, 503, {
       error: "OPENAI_API_KEY is not configured. Browser demo voice mode is still available.",
     });
@@ -557,9 +599,9 @@ async function handleRealtimeSession(req, res) {
   const sdp = await readBody(req);
   const sessionConfig = JSON.stringify({
     type: "realtime",
-    model: process.env.OPENAI_REALTIME_MODEL || "gpt-realtime",
+    model: process.env.OPENAI_REALTIME_MODEL || "gpt-realtime-2",
     instructions:
-      "You are the warm, calm voice companion for This Day Then. Speak briefly, softly, and ask one gentle question at a time. Help the user notice ordinary details from today. Avoid therapy, diagnosis, pressure, and long explanations.",
+      "You are the warm, optimistic voice companion for This Day Then. Speak briefly, softly, and ask one gentle question at a time. Help the user notice ordinary details from today. Sound encouraging and human, with natural pauses and a quiet lift. Avoid therapy, diagnosis, pressure, and long explanations.",
     audio: {
       input: {
         transcription: {
@@ -585,7 +627,7 @@ async function handleRealtimeSession(req, res) {
   const response = await fetch("https://api.openai.com/v1/realtime/calls", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      Authorization: `Bearer ${openAiApiKey}`,
     },
     body: formData,
   });
@@ -595,6 +637,73 @@ async function handleRealtimeSession(req, res) {
     "Content-Type": response.ok ? "application/sdp" : "text/plain; charset=utf-8",
   });
   res.end(body);
+}
+
+async function handleOpenAiTts(req, res) {
+  if (!openAiApiKey) {
+    sendJson(res, 503, {
+      error: "OPENAI_API_KEY is not configured. Browser demo voice mode is still available.",
+    });
+    return;
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(await readBody(req));
+  } catch {
+    sendJson(res, 400, { error: "Expected a JSON body." });
+    return;
+  }
+
+  const text = typeof payload.text === "string" ? payload.text.trim() : "";
+  if (!text) {
+    sendJson(res, 400, { error: "Text is required." });
+    return;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    Number(process.env.OPENAI_TTS_TIMEOUT_MS || 45000)
+  );
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/audio/speech", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${openAiApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: openAiTtsModel,
+        voice: openAiTtsVoice,
+        input: text,
+        instructions: openAiTtsInstructions,
+        response_format: process.env.OPENAI_TTS_FORMAT || "wav",
+      }),
+      signal: controller.signal,
+    });
+
+    const body = Buffer.from(await response.arrayBuffer());
+    if (!response.ok) {
+      sendText(res, response.status, body.toString("utf8") || "OpenAI TTS failed.");
+      return;
+    }
+
+    res.writeHead(200, {
+      "Content-Type": response.headers.get("content-type") || "audio/wav",
+      "Cache-Control": "no-store",
+    });
+    res.end(body);
+  } catch (error) {
+    const message =
+      error.name === "AbortError"
+        ? "OpenAI TTS timed out."
+        : "OpenAI TTS is not reachable. Browser demo voice mode is still available.";
+    sendJson(res, 502, { error: message });
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function handleLocalTts(req, res) {
@@ -662,10 +771,12 @@ async function handleLocalTts(req, res) {
   }
 }
 
-function preferredVoiceMode({ localTtsReady, realtimeReady }) {
+function preferredVoiceMode({ localTtsReady, openAiTtsReady, realtimeReady }) {
   if (process.env.VOICE_MODE === "browser-demo") return "browser-demo";
+  if (process.env.VOICE_MODE === "openai-tts" && openAiTtsReady) return "openai-tts";
   if (process.env.VOICE_MODE === "openai-realtime" && realtimeReady) return "openai-realtime";
   if (process.env.VOICE_MODE === "local-tts" && localTtsReady) return "local-tts";
+  if (openAiTtsReady) return "openai-tts";
   if (localTtsReady) return "local-tts";
   if (realtimeReady) return "openai-realtime";
   return "browser-demo";
