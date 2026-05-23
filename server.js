@@ -607,7 +607,7 @@ async function handleRealtimeSession(req, res) {
     type: "realtime",
     model: process.env.OPENAI_REALTIME_MODEL || "gpt-realtime-2",
     instructions:
-      "You are the warm, optimistic voice companion for This Day Then. Speak briefly, softly, and ask one gentle question at a time. Help the user notice ordinary details from today. Sound encouraging and human, with natural pauses and a quiet lift. Avoid therapy, diagnosis, pressure, and long explanations.",
+      "You are the warm, optimistic voice companion for This Day Then. This should feel like an open chat with a kind friend, not a survey. Listen for the user's pauses, respond naturally, and keep the conversation moving with one gentle question only when it helps. Speak briefly, softly, and humanly, with natural pauses and a quiet lift. Help the user notice ordinary details from today. Avoid therapy, diagnosis, pressure, and long explanations.",
     audio: {
       input: {
         transcription: {
@@ -621,7 +621,7 @@ async function handleRealtimeSession(req, res) {
         },
       },
       output: {
-        voice: process.env.OPENAI_REALTIME_VOICE || "marin",
+        voice: process.env.OPENAI_REALTIME_VOICE || "coral",
       },
     },
   });
@@ -782,9 +782,9 @@ function preferredVoiceMode({ localTtsReady, openAiTtsReady, realtimeReady }) {
   if (process.env.VOICE_MODE === "openai-tts" && openAiTtsReady) return "openai-tts";
   if (process.env.VOICE_MODE === "openai-realtime" && realtimeReady) return "openai-realtime";
   if (process.env.VOICE_MODE === "local-tts" && localTtsReady) return "local-tts";
+  if (realtimeReady) return "openai-realtime";
   if (openAiTtsReady) return "openai-tts";
   if (localTtsReady) return "local-tts";
-  if (realtimeReady) return "openai-realtime";
   return "browser-demo";
 }
 

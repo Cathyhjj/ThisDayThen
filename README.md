@@ -70,17 +70,19 @@ testing only, set `EMAIL_DEV_MODE=1`; the server will print and return the code
 instead of sending an email.
 
 This version still uses local summary drafting. When `OPENAI_API_KEY` is configured,
-voice prompts use OpenAI speech generation with the `fable` voice and a warm
-Eternal Optimist-style delivery. The server also includes `/api/realtime-session`
-for OpenAI Realtime WebRTC if `VOICE_MODE=openai-realtime` is set.
+voice chat uses OpenAI Realtime WebRTC so one tap opens a live, hands-free
+conversation. The app keeps OpenAI speech generation with the `fable` voice as
+a fallback path when `VOICE_MODE=openai-tts` is set.
 
 Useful OpenAI voice knobs:
 
 - `OPENAI_API_KEY` - enables OpenAI voice generation
-- `VOICE_MODE=openai-tts` - prefer OpenAI speech generation, the default when a key is configured
+- `VOICE_MODE=openai-realtime` - prefer live voice chat, the default when a key is configured
+- `OPENAI_REALTIME_MODEL=gpt-realtime-2` - model used for live voice chat
+- `OPENAI_REALTIME_VOICE=coral` - selected Realtime voice
+- `VOICE_MODE=openai-tts` - use Fable speech generation instead of live Realtime chat
 - `OPENAI_TTS_MODEL=gpt-4o-mini-tts` - speech generation model
 - `OPENAI_TTS_VOICE=fable` - selected voice
-- `OPENAI_REALTIME_MODEL=gpt-realtime-2` - model used when `VOICE_MODE=openai-realtime`
 
 ## Natural local voice
 

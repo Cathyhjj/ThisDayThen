@@ -145,9 +145,7 @@ function bindEvents() {
   });
 
   elements.voiceOrb.addEventListener("click", () => {
-    if (state.voice.active) {
-      finishVoiceSession();
-    } else {
+    if (!state.voice.active) {
       startVoiceSession();
     }
   });
@@ -492,7 +490,7 @@ async function checkVoiceMode() {
         "Local AI voice is configured. Tap the orb to begin a more natural check-in.";
     } else if (state.voice.mode === "openai-realtime") {
       elements.voiceHint.textContent =
-        "Realtime voice is configured. Tap the orb to begin a live audio check-in.";
+        "Live voice chat is configured. Tap once, then just talk naturally.";
     }
     if (!state.voice.active) {
       updateVoiceUI("idle");
@@ -832,7 +830,8 @@ async function startRealtimeVoiceSession() {
         type: "response.create",
         response: {
           modalities: ["audio", "text"],
-          instructions: "Begin with one short, soft question: I'm here. What stayed with you from today?",
+          instructions:
+            "Begin like a close friend joining a quiet call. Say briefly: I'm here with you. What do you feel like talking about from today?",
         },
       });
     });
@@ -951,8 +950,8 @@ function updateVoiceUI(status, label, hint) {
     hint ||
     (status === "idle"
       ? idleVoiceHint()
-      : "No transcript is shown while you speak. The day is gathered quietly in the background.");
-  elements.startVoice.textContent = state.voice.active ? "Live voice is open" : "Start live voice";
+      : activeVoiceHint());
+  elements.startVoice.textContent = state.voice.active ? "Voice chat is open" : "Start voice chat";
 }
 
 function idleVoiceHint() {
@@ -963,9 +962,16 @@ function idleVoiceHint() {
     return "Local AI voice is configured. Tap the orb to begin a more natural check-in.";
   }
   if (state.voice.mode === "openai-realtime") {
-    return "Realtime voice is configured. Tap the orb to begin a live audio check-in.";
+    return "Tap once to open a live voice chat. After that, just talk naturally.";
   }
   return "Tap the orb and speak naturally. She will listen, pause, and ask the next gentle question.";
+}
+
+function activeVoiceHint() {
+  if (state.voice.mode === "openai-realtime") {
+    return "Keep talking naturally. She will listen for pauses and answer like an open conversation.";
+  }
+  return "No transcript is shown while you speak. The day is gathered quietly in the background.";
 }
 
 function toggleTranscript() {
