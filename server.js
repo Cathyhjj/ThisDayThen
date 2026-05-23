@@ -3,6 +3,7 @@ import http from "node:http";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { createDiaryStorage } from "./storage.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,13 +20,14 @@ const localTtsUrl = process.env.LOCAL_TTS_URL || "";
 const databasePath = process.env.DIARY_DB_PATH
   ? path.resolve(process.env.DIARY_DB_PATH)
   : path.join(__dirname, "data", "this-day-then-db.json");
+const databaseUrl = process.env.DATABASE_URL || "";
 const sessionMaxAgeSeconds = 60 * 60 * 24 * 30;
 const oauthCookieMaxAgeSeconds = 60 * 10;
 const registrationCodeMaxAgeMs = 10 * 60 * 1000;
 const registrationCodeCooldownMs = 60 * 1000;
 const maxRegistrationCodeAttempts = 5;
 const maxJsonBytes = 1024 * 1024;
-const database = loadDatabase();
+const storage = createDiaryStorage({ databaseUrl, databasePath });
 let googleJwksCache = { expiresAt: 0, keys: [] };
 
 function loadLocalEnv() {
@@ -75,7 +77,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && url.pathname === "/api/auth/me") {
-      const user = getAuthenticatedUser(req);
+      const user = await getAuthenticatedUser(req);
       sendJson(res, 200, { user: user ? publicUser(user) : null });
       return;
     }
@@ -109,12 +111,12 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && url.pathname === "/api/auth/logout") {
-      handleLogout(req, res);
+      await handleLogout(req, res);
       return;
     }
 
     if (req.method === "GET" && url.pathname === "/api/entries") {
-      handleListEntries(req, res);
+      await handleListEntries(req, res);
       return;
     }
 
@@ -168,9 +170,41 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(port, () => {
-  console.log(`This Day Then is listening on ${port}`);
+startServer().catch((error) => {
+  console.error("This Day Then could not start.", error);
+  process.exit(1);
 });
+
+async function startServer() {
+  await initializeStorageWithRetry();
+  server.listen(port, () => {
+    console.log(`This Day Then is listening on ${port} with ${storage.kind} storage`);
+  });
+}
+
+async function initializeStorageWithRetry() {
+  const maxAttempts = databaseUrl
+    ? Number.parseInt(process.env.DATABASE_INIT_ATTEMPTS || "12", 10) || 12
+    : 1;
+  const delayMs = Number.parseInt(process.env.DATABASE_INIT_RETRY_MS || "5000", 10) || 5000;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await storage.initialize();
+      return;
+    } catch (error) {
+      if (attempt >= maxAttempts) throw error;
+      console.warn(
+        `Storage initialization failed (${attempt}/${maxAttempts}); retrying in ${delayMs}ms.`
+      );
+      await delay(delayMs);
+    }
+  }
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
 
 async function handleRegisterStart(req, res) {
   let payload;
@@ -188,13 +222,13 @@ async function handleRegisterStart(req, res) {
   }
 
   const { name, email, password } = registration;
-  if (database.users.some((user) => user.email === email)) {
+  if (await storage.findUserByEmail(email)) {
     sendJson(res, 409, { error: "An account with that email already exists." });
     return;
   }
 
-  pruneExpiredEmailCodes();
-  const existingCode = findPendingRegistration(email);
+  await storage.pruneExpiredEmailCodes();
+  const existingCode = await storage.findPendingRegistration(email);
   if (
     existingCode &&
     Date.now() - Date.parse(existingCode.updatedAt || existingCode.createdAt) < registrationCodeCooldownMs
@@ -220,11 +254,7 @@ async function handleRegisterStart(req, res) {
     expiresAt: new Date(Date.now() + registrationCodeMaxAgeMs).toISOString(),
   };
 
-  database.emailCodes = database.emailCodes.filter(
-    (record) => !(record.purpose === "registration" && record.email === email)
-  );
-  database.emailCodes.push(pendingRegistration);
-  writeDatabase();
+  await storage.savePendingRegistration(pendingRegistration);
 
   try {
     const delivery = await sendRegistrationCodeEmail({ email, name, code });
@@ -236,8 +266,7 @@ async function handleRegisterStart(req, res) {
     if (delivery.devCode) response.devCode = delivery.devCode;
     sendJson(res, 202, response);
   } catch (error) {
-    database.emailCodes = database.emailCodes.filter((record) => record.id !== pendingRegistration.id);
-    writeDatabase();
+    await storage.deleteEmailCode(pendingRegistration.id);
     console.error("Registration email failed.", error);
     sendJson(res, error.status || 502, {
       error: error.publicMessage || error.message || "Could not send the verification email.",
@@ -267,17 +296,15 @@ async function handleRegisterVerify(req, res) {
     return;
   }
 
-  const pruned = pruneExpiredEmailCodes();
-  const pendingRegistration = findPendingRegistration(email);
+  await storage.pruneExpiredEmailCodes();
+  const pendingRegistration = await storage.findPendingRegistration(email);
   if (!pendingRegistration) {
-    if (pruned) writeDatabase();
     sendJson(res, 410, { error: "That code expired or was not found. Please request a new one." });
     return;
   }
 
-  if (database.users.some((user) => user.email === email)) {
-    database.emailCodes = database.emailCodes.filter((record) => record.id !== pendingRegistration.id);
-    writeDatabase();
+  if (await storage.findUserByEmail(email)) {
+    await storage.deleteEmailCode(pendingRegistration.id);
     sendJson(res, 409, { error: "An account with that email already exists." });
     return;
   }
@@ -288,13 +315,12 @@ async function handleRegisterVerify(req, res) {
     pendingRegistration.updatedAt = new Date().toISOString();
 
     if (pendingRegistration.attempts >= maxRegistrationCodeAttempts) {
-      database.emailCodes = database.emailCodes.filter((record) => record.id !== pendingRegistration.id);
-      writeDatabase();
+      await storage.deleteEmailCode(pendingRegistration.id);
       sendJson(res, 429, { error: "Too many incorrect codes. Please request a new one." });
       return;
     }
 
-    writeDatabase();
+    await storage.updateEmailCode(pendingRegistration);
     sendJson(res, 401, { error: "That code is not right." });
     return;
   }
@@ -310,16 +336,15 @@ async function handleRegisterVerify(req, res) {
     createdAt: now,
     updatedAt: now,
   };
-  database.users.push(user);
-  database.emailCodes = database.emailCodes.filter((record) => record.id !== pendingRegistration.id);
-  const sessionToken = createSession(user.id);
-  writeDatabase();
+  const savedUser = await storage.createUser(user);
+  await storage.deleteEmailCode(pendingRegistration.id);
+  const sessionToken = await createSession(savedUser.id);
 
   res.writeHead(201, {
     "Content-Type": "application/json; charset=utf-8",
     "Set-Cookie": buildSessionCookie(sessionToken, req),
   });
-  res.end(JSON.stringify({ user: publicUser(user) }));
+  res.end(JSON.stringify({ user: publicUser(savedUser) }));
 }
 
 async function handleLogin(req, res) {
@@ -333,15 +358,14 @@ async function handleLogin(req, res) {
 
   const email = normalizeEmail(payload.email);
   const password = typeof payload.password === "string" ? payload.password : "";
-  const user = database.users.find((candidate) => candidate.email === email);
+  const user = await storage.findUserByEmail(email);
 
   if (!user || !user.passwordHash || !verifyPassword(password, user.passwordHash)) {
     sendJson(res, 401, { error: "Email or password is not right." });
     return;
   }
 
-  const sessionToken = createSession(user.id);
-  writeDatabase();
+  const sessionToken = await createSession(user.id);
 
   res.writeHead(200, {
     "Content-Type": "application/json; charset=utf-8",
@@ -490,9 +514,8 @@ async function handleGoogleCallback(req, res, url) {
   try {
     const tokens = await exchangeGoogleCode(req, code);
     const claims = await verifyGoogleIdToken(tokens.id_token, expectedNonce);
-    const user = findOrCreateGoogleUser(claims);
-    const sessionToken = createSession(user.id);
-    writeDatabase();
+    const user = await findOrCreateGoogleUser(claims);
+    const sessionToken = await createSession(user.id);
 
     res.writeHead(302, {
       Location: "/",
@@ -509,12 +532,11 @@ async function handleGoogleCallback(req, res, url) {
   }
 }
 
-function handleLogout(req, res) {
+async function handleLogout(req, res) {
   const sessionToken = parseCookies(req.headers.cookie).session;
   if (sessionToken) {
     const sessionId = hashSessionToken(sessionToken);
-    database.sessions = database.sessions.filter((session) => session.id !== sessionId);
-    writeDatabase();
+    await storage.deleteSession(sessionId);
   }
 
   res.writeHead(200, {
@@ -524,20 +546,17 @@ function handleLogout(req, res) {
   res.end(JSON.stringify({ ok: true }));
 }
 
-function handleListEntries(req, res) {
-  const user = requireUser(req, res);
+async function handleListEntries(req, res) {
+  const user = await requireUser(req, res);
   if (!user) return;
 
-  const entries = database.entries
-    .filter((entry) => entry.userId === user.id)
-    .sort((a, b) => b.date.localeCompare(a.date))
-    .map(publicEntry);
+  const entries = (await storage.listEntries(user.id)).map(publicEntry);
 
   sendJson(res, 200, { entries });
 }
 
 async function handleSaveEntry(req, res) {
-  const user = requireUser(req, res);
+  const user = await requireUser(req, res);
   if (!user) return;
 
   let payload;
@@ -563,28 +582,15 @@ async function handleSaveEntry(req, res) {
   }
 
   const now = new Date().toISOString();
-  let entry = database.entries.find(
-    (candidate) => candidate.userId === user.id && candidate.date === date
-  );
-
-  if (entry) {
-    entry.summary = summary;
-    entry.conversation = conversation;
-    entry.updatedAt = now;
-  } else {
-    entry = {
-      id: crypto.randomUUID(),
-      userId: user.id,
-      date,
-      summary,
-      conversation,
-      createdAt: now,
-      updatedAt: now,
-    };
-    database.entries.push(entry);
-  }
-
-  writeDatabase();
+  const entry = await storage.upsertEntry({
+    id: crypto.randomUUID(),
+    userId: user.id,
+    date,
+    summary,
+    conversation,
+    createdAt: now,
+    updatedAt: now,
+  });
   sendJson(res, 200, { entry: publicEntry(entry) });
 }
 
@@ -782,8 +788,8 @@ function preferredVoiceMode({ localTtsReady, openAiTtsReady, realtimeReady }) {
   return "browser-demo";
 }
 
-function requireUser(req, res) {
-  const user = getAuthenticatedUser(req);
+async function requireUser(req, res) {
+  const user = await getAuthenticatedUser(req);
   if (!user) {
     sendJson(res, 401, { error: "Please sign in first." });
     return null;
@@ -884,14 +890,12 @@ async function getGoogleJwks() {
   return googleJwksCache;
 }
 
-function findOrCreateGoogleUser(claims) {
+async function findOrCreateGoogleUser(claims) {
   const googleId = String(claims.sub);
   const email = normalizeEmail(claims.email);
   const name = normalizeName(claims.name) || email.split("@")[0] || "Google user";
   const now = new Date().toISOString();
-  let user =
-    database.users.find((candidate) => candidate.googleId === googleId) ||
-    database.users.find((candidate) => candidate.email === email);
+  let user = await storage.findUserByGoogleIdOrEmail(googleId, email);
 
   if (user) {
     user.googleId = user.googleId || googleId;
@@ -899,7 +903,7 @@ function findOrCreateGoogleUser(claims) {
     user.name = user.name || name;
     user.avatarUrl = typeof claims.picture === "string" ? claims.picture : user.avatarUrl || "";
     user.updatedAt = now;
-    return user;
+    return storage.updateUser(user);
   }
 
   user = {
@@ -912,44 +916,34 @@ function findOrCreateGoogleUser(claims) {
     createdAt: now,
     updatedAt: now,
   };
-  database.users.push(user);
-  return user;
+  return storage.createUser(user);
 }
 
-function getAuthenticatedUser(req) {
+async function getAuthenticatedUser(req) {
   const sessionToken = parseCookies(req.headers.cookie).session;
   if (!sessionToken) return null;
 
   const sessionId = hashSessionToken(sessionToken);
-  const session = database.sessions.find((candidate) => candidate.id === sessionId);
+  const session = await storage.findSessionById(sessionId);
   if (!session) return null;
 
   if (Date.parse(session.expiresAt) <= Date.now()) {
-    database.sessions = database.sessions.filter((candidate) => candidate.id !== sessionId);
-    writeDatabase();
+    await storage.deleteSession(sessionId);
     return null;
   }
 
-  return database.users.find((user) => user.id === session.userId) || null;
+  return storage.findUserById(session.userId);
 }
 
-function createSession(userId) {
-  pruneExpiredSessions();
+async function createSession(userId) {
   const token = crypto.randomBytes(32).toString("base64url");
-  database.sessions.push({
+  await storage.createSession({
     id: hashSessionToken(token),
     userId,
     createdAt: new Date().toISOString(),
     expiresAt: new Date(Date.now() + sessionMaxAgeSeconds * 1000).toISOString(),
   });
   return token;
-}
-
-function pruneExpiredSessions() {
-  const now = Date.now();
-  const before = database.sessions.length;
-  database.sessions = database.sessions.filter((session) => Date.parse(session.expiresAt) > now);
-  return database.sessions.length !== before;
 }
 
 function buildSessionCookie(token, req) {
@@ -1015,19 +1009,6 @@ function timingSafeEqualString(actual, expected) {
     actualBuffer.length === expectedBuffer.length &&
     crypto.timingSafeEqual(actualBuffer, expectedBuffer)
   );
-}
-
-function findPendingRegistration(email) {
-  return database.emailCodes.find(
-    (record) => record.purpose === "registration" && record.email === email
-  );
-}
-
-function pruneExpiredEmailCodes() {
-  const now = Date.now();
-  const before = database.emailCodes.length;
-  database.emailCodes = database.emailCodes.filter((record) => Date.parse(record.expiresAt) > now);
-  return database.emailCodes.length !== before;
 }
 
 function parseCookies(header = "") {
@@ -1113,28 +1094,6 @@ function normalizeConversation(value) {
           : new Date().toISOString(),
     }))
     .filter((message) => message.text);
-}
-
-function loadDatabase() {
-  fs.mkdirSync(path.dirname(databasePath), { recursive: true });
-  if (!fs.existsSync(databasePath)) {
-    return { users: [], sessions: [], entries: [], emailCodes: [] };
-  }
-
-  const parsed = JSON.parse(fs.readFileSync(databasePath, "utf8"));
-  return {
-    users: Array.isArray(parsed.users) ? parsed.users : [],
-    sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
-    entries: Array.isArray(parsed.entries) ? parsed.entries : [],
-    emailCodes: Array.isArray(parsed.emailCodes) ? parsed.emailCodes : [],
-  };
-}
-
-function writeDatabase() {
-  fs.mkdirSync(path.dirname(databasePath), { recursive: true });
-  const tempPath = `${databasePath}.${process.pid}.tmp`;
-  fs.writeFileSync(tempPath, `${JSON.stringify(database, null, 2)}\n`);
-  fs.renameSync(tempPath, databasePath);
 }
 
 function googleRedirectUri(req) {
