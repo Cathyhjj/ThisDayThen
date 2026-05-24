@@ -39,9 +39,13 @@ services:
       - key: OPENAI_TTS_VOICE
         value: fable
       - key: OPENAI_REALTIME_MODEL
-        value: gpt-realtime-2
+        value: gpt-realtime
       - key: OPENAI_REALTIME_VOICE
         value: coral
+      - key: OPENAI_SUMMARY_MODEL
+        value: gpt-5.5
+      - key: OPENAI_SUMMARY_FALLBACK_MODEL
+        value: gpt-4.1-mini
     domains:
       - thisdaythen.com
       - www.thisdaythen.com

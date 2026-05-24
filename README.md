@@ -10,7 +10,7 @@ The prototype now includes a small built-in backend for private accounts and sav
 - Optional local Chatterbox TTS voice for more natural open-source speech
 - Browser demo live voice mode with speech recognition/synthesis where supported
 - Green meditative design with a breathing canvas background
-- Drafts a five-line memory from the conversation
+- Drafts a five-line memory from the real conversation transcript
 - Creates accounts, logs users in with HttpOnly cookie sessions, and saves entries per user
 - Sends a six-digit email code before creating password accounts
 - Supports Google sign-in when OAuth credentials are configured
@@ -69,17 +69,20 @@ EMAIL_FROM="This Day Then <hello@thisdaythen.com>"
 testing only, set `EMAIL_DEV_MODE=1`; the server will print and return the code
 instead of sending an email.
 
-This version still uses local summary drafting. When `OPENAI_API_KEY` is configured,
-voice chat uses OpenAI Realtime WebRTC so one tap opens a live, hands-free
-conversation. The app keeps OpenAI speech generation with the `fable` voice as
-a fallback path when `VOICE_MODE=openai-tts` is set.
+When `OPENAI_API_KEY` is configured, voice chat uses OpenAI Realtime WebRTC so
+one tap opens a live, hands-free conversation. The app also uses the Responses
+API with structured output to draft exactly five lines from the user's transcript
+without adding unstated details. The app keeps OpenAI speech generation with the
+`fable` voice as a fallback path when `VOICE_MODE=openai-tts` is set.
 
 Useful OpenAI voice knobs:
 
 - `OPENAI_API_KEY` - enables OpenAI voice generation
 - `VOICE_MODE=openai-realtime` - prefer live voice chat, the default when a key is configured
-- `OPENAI_REALTIME_MODEL=gpt-realtime-2` - model used for live voice chat
+- `OPENAI_REALTIME_MODEL=gpt-realtime` - model used for live voice chat
 - `OPENAI_REALTIME_VOICE=coral` - selected Realtime voice
+- `OPENAI_SUMMARY_MODEL=gpt-5.5` - primary model for five-line summaries
+- `OPENAI_SUMMARY_FALLBACK_MODEL=gpt-4.1-mini` - fallback if the primary summary model is unavailable
 - `VOICE_MODE=openai-tts` - use Fable speech generation instead of live Realtime chat
 - `OPENAI_TTS_MODEL=gpt-4o-mini-tts` - speech generation model
 - `OPENAI_TTS_VOICE=fable` - selected voice

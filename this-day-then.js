@@ -1,5 +1,8 @@
 const THEME_KEY = "this-day-then.theme.v1";
 const GUEST_MESSAGE = "Guest mode is temporary. Entries stay only until this page is refreshed.";
+const VOICE_CHAT_LIMIT_MS = 5 * 60 * 1000;
+const VOICE_WRAP_UP_TEXT =
+  "Let's pause here. I'll turn what you shared into five honest lines now.";
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
@@ -24,6 +27,14 @@ const state = {
     localAudio: null,
     localAudioUrl: "",
     ttsController: null,
+    startedAt: 0,
+    timeLimitTimer: null,
+    timeLimitReached: false,
+    wrapUpPending: false,
+    wrappingUp: false,
+    finalizing: false,
+    userSpeaking: false,
+    wrapUpResponseId: "",
   },
 };
 
@@ -508,13 +519,14 @@ function startVoiceSession() {
   }
 
   state.voice.active = true;
+  startVoiceSessionLimit();
   updateVoiceUI("speaking", "She is beginning softly");
   speakBot(nextPromptText());
 }
 
-function finishVoiceSession() {
+async function finishVoiceSession() {
   stopVoiceSession();
-  draftSummary();
+  await draftSummary();
   updateVoiceUI("idle", "Five lines are ready to shape");
   flashButton(elements.finishVoice, "Drafted");
 }
@@ -523,6 +535,14 @@ function stopVoiceSession() {
   state.voice.active = false;
   state.voice.listening = false;
   state.voice.speaking = false;
+  state.voice.userSpeaking = false;
+  state.voice.timeLimitReached = false;
+  state.voice.wrapUpPending = false;
+  state.voice.wrappingUp = false;
+  state.voice.finalizing = false;
+  state.voice.startedAt = 0;
+  state.voice.wrapUpResponseId = "";
+  clearVoiceSessionLimit();
   state.voice.ttsController?.abort();
   state.voice.ttsController = null;
   cleanupLocalAudio();
@@ -533,6 +553,91 @@ function stopVoiceSession() {
     state.voice.recognition = null;
   }
   stopRealtimeVoiceSession();
+}
+
+function startVoiceSessionLimit() {
+  clearVoiceSessionLimit();
+  state.voice.startedAt = Date.now();
+  state.voice.timeLimitReached = false;
+  state.voice.wrapUpPending = false;
+  state.voice.wrappingUp = false;
+  state.voice.finalizing = false;
+  state.voice.userSpeaking = false;
+  state.voice.timeLimitTimer = window.setTimeout(() => {
+    requestVoiceWrapUp();
+  }, VOICE_CHAT_LIMIT_MS);
+}
+
+function clearVoiceSessionLimit() {
+  if (state.voice.timeLimitTimer) {
+    window.clearTimeout(state.voice.timeLimitTimer);
+    state.voice.timeLimitTimer = null;
+  }
+}
+
+function requestVoiceWrapUp() {
+  if (!state.voice.active || state.voice.wrappingUp || state.voice.finalizing) return;
+
+  state.voice.timeLimitReached = true;
+  state.voice.wrapUpPending = true;
+
+  if (state.voice.userSpeaking) {
+    updateVoiceUI(
+      "listening",
+      "Finish your thought",
+      "The five-minute check-in is ending. I will wait until you finish, then draft the five lines."
+    );
+    return;
+  }
+
+  sendVoiceWrapUp();
+}
+
+function sendVoiceWrapUp() {
+  if (!state.voice.active || state.voice.wrappingUp || state.voice.finalizing) return;
+
+  state.voice.wrapUpPending = false;
+  state.voice.wrappingUp = true;
+  clearVoiceSessionLimit();
+
+  if (state.voice.mode === "openai-realtime" && state.voice.realtime) {
+    updateVoiceUI("speaking", "Wrapping up");
+    state.voice.wrapUpResponseId = "pending";
+    sendRealtimeEvent({ type: "response.cancel" });
+    sendRealtimeEvent({ type: "output_audio_buffer.clear" });
+    sendRealtimeEvent({
+      type: "response.create",
+      response: {
+        output_modalities: ["audio"],
+        max_output_tokens: 80,
+        instructions:
+          "The five-minute check-in is complete. Briefly thank the user, say you will turn what they shared into five lines, and do not ask another question.",
+      },
+    });
+    window.setTimeout(() => {
+      if (state.voice.wrappingUp) finalizeVoiceWrapUp();
+    }, 12000);
+    return;
+  }
+
+  if (state.voice.recognition) {
+    state.voice.recognition.onend = null;
+    state.voice.recognition.stop();
+    state.voice.recognition = null;
+  }
+  state.voice.listening = false;
+  updateVoiceUI("speaking", "Wrapping up");
+  speakBot(VOICE_WRAP_UP_TEXT);
+}
+
+async function finalizeVoiceWrapUp() {
+  if (state.voice.finalizing) return;
+  state.voice.finalizing = true;
+
+  await draftSummary();
+  stopVoiceSession();
+  updateVoiceUI("idle", "Five lines are ready to shape", "Review them and save when they feel true.");
+  flashButton(elements.finishVoice, "Drafted");
 }
 
 async function speakBot(text) {
@@ -697,6 +802,10 @@ function speakWithBrowserVoice(text) {
 function finishBotSpeech() {
   state.voice.speaking = false;
   cleanupLocalAudio();
+  if (state.voice.wrappingUp) {
+    finalizeVoiceWrapUp();
+    return;
+  }
   if (state.voice.active) {
     updateVoiceUI("listening", "Listening");
     startListening();
@@ -747,9 +856,23 @@ function startListening() {
     stopVoiceSession();
   };
 
+  recognition.onspeechstart = () => {
+    state.voice.userSpeaking = true;
+  };
+
+  recognition.onspeechend = () => {
+    state.voice.userSpeaking = false;
+    if (state.voice.wrapUpPending) {
+      window.setTimeout(() => requestVoiceWrapUp(), 250);
+    }
+  };
+
   recognition.onend = () => {
     state.voice.listening = false;
-    if (state.voice.active && !state.voice.speaking) {
+    state.voice.userSpeaking = false;
+    if (state.voice.wrapUpPending) {
+      window.setTimeout(() => requestVoiceWrapUp(), 250);
+    } else if (state.voice.active && !state.voice.speaking) {
       window.setTimeout(() => startListening(), 500);
     }
   };
@@ -761,6 +884,7 @@ function startListening() {
 
 function acceptUserVoiceText(text) {
   pushMessage("user", text);
+  state.voice.userSpeaking = false;
   if (state.voice.recognition) {
     state.voice.recognition.onend = null;
     state.voice.recognition.stop();
@@ -769,6 +893,11 @@ function acceptUserVoiceText(text) {
   state.voice.listening = false;
 
   if (!state.voice.active) return;
+
+  if (state.voice.timeLimitReached || state.voice.wrapUpPending) {
+    sendVoiceWrapUp();
+    return;
+  }
 
   const userCount = countUserMessages();
   const nextPrompt =
@@ -825,11 +954,12 @@ async function startRealtimeVoiceSession() {
 
     dataChannel.addEventListener("open", () => {
       state.voice.realtime = { peerConnection, dataChannel, stream, audio, transcriptDrafts };
+      startVoiceSessionLimit();
       updateVoiceUI("speaking", "She is beginning softly");
       sendRealtimeEvent({
         type: "response.create",
         response: {
-          modalities: ["audio", "text"],
+          output_modalities: ["audio"],
           instructions:
             "Begin like a close friend joining a quiet call. Say briefly: I'm here with you. What do you feel like talking about from today?",
         },
@@ -894,12 +1024,25 @@ function handleRealtimeEvent(rawEvent, transcriptDrafts) {
   }
 
   if (event.type === "input_audio_buffer.speech_started") {
+    state.voice.userSpeaking = true;
     updateVoiceUI("listening", "Listening");
     return;
   }
 
   if (event.type === "input_audio_buffer.speech_stopped") {
+    state.voice.userSpeaking = false;
+    if (state.voice.wrapUpPending) {
+      window.setTimeout(() => requestVoiceWrapUp(), 250);
+      return;
+    }
     updateVoiceUI("thinking", "Letting that settle");
+    return;
+  }
+
+  if (event.type === "response.created") {
+    if (state.voice.wrappingUp && state.voice.wrapUpResponseId === "pending") {
+      state.voice.wrapUpResponseId = event.response?.id || "";
+    }
     return;
   }
 
@@ -909,11 +1052,23 @@ function handleRealtimeEvent(rawEvent, transcriptDrafts) {
   }
 
   if (event.type === "response.done" || event.type === "response.audio.done") {
+    if (state.voice.wrappingUp && isWrapUpRealtimeResponseDone(event)) {
+      window.setTimeout(() => finalizeVoiceWrapUp(), 900);
+      return;
+    }
     updateVoiceUI("listening", "Listening");
     return;
   }
 
+  if (event.type === "conversation.item.input_audio_transcription.delta" && event.delta) {
+    const key = `user:${event.item_id || "latest"}`;
+    transcriptDrafts.set(key, `${transcriptDrafts.get(key) || ""}${event.delta || ""}`);
+    return;
+  }
+
   if (event.type === "conversation.item.input_audio_transcription.completed" && event.transcript) {
+    const key = `user:${event.item_id || "latest"}`;
+    transcriptDrafts.delete(key);
     pushMessage("user", event.transcript.trim());
     return;
   }
@@ -929,6 +1084,30 @@ function handleRealtimeEvent(rawEvent, transcriptDrafts) {
     const text = event.transcript || transcriptDrafts.get(key) || "";
     transcriptDrafts.delete(key);
     pushMessage("bot", text.trim());
+    return;
+  }
+
+  if (event.type === "response.output_item.done") {
+    pushAssistantTranscriptFromRealtimeItem(event.item);
+  }
+}
+
+function isWrapUpRealtimeResponseDone(event) {
+  const responseId = event.response?.id || event.response_id || "";
+  if (!state.voice.wrapUpResponseId || state.voice.wrapUpResponseId === "pending") return false;
+  if (responseId !== state.voice.wrapUpResponseId) return false;
+  return event.response?.status !== "cancelled";
+}
+
+function pushAssistantTranscriptFromRealtimeItem(item) {
+  if (item?.role !== "assistant" || !Array.isArray(item.content)) return;
+  const text = item.content
+    .map((content) => content?.transcript || content?.text || "")
+    .join(" ")
+    .trim();
+  const lastMessage = currentChat().at(-1);
+  if (text && !(lastMessage?.role === "bot" && lastMessage.text === text)) {
+    pushMessage("bot", text);
   }
 }
 
@@ -997,37 +1176,53 @@ function renderReflection() {
   elements.reflectionBox.textContent = `Across ${years}, this date seems to hold ${themes}. The entries feel less like proof of progress and more like evidence that you kept meeting your life with attention.`;
 }
 
-function draftSummary(isRegeneration = false) {
+async function draftSummary(isRegeneration = false) {
   const userTexts = currentChat()
     .filter((message) => message.role === "user")
     .map((message) => message.text);
 
   if (!userTexts.length) {
-    elements.summaryEditor.value =
-      "Today was quiet enough to need no performance.\nI arrived with whatever energy I had.\nA small detail asked to be remembered.\nI let the day be imperfect and still mine.\nFuture-me can begin from here.";
+    elements.summaryEditor.value = "";
+    setAuthMessage("Share at least one real detail first, then I can draft five honest lines.", true);
     return;
   }
 
-  const joined = userTexts.join(" ");
-  const details = extractDetails(joined);
-  const tone = inferTone(joined);
-  const variant = isRegeneration ? 1 : 0;
+  setSummaryDrafting(true);
 
-  const lines = [
-    `Today felt ${tone}.`,
-    details.person
-      ? `${details.person} shaped the day more than I expected.`
-      : `${details.anchor} stayed with me.`,
-    details.place
-      ? `There was something about ${details.place} that made the memory easier to hold.`
-      : "I noticed the texture of the day instead of rushing past it.",
-    variant
-      ? "I did not need to make the day bigger than it was."
-      : "I tried to be honest about what I had enough energy for.",
-    "These are the lines I want future-me to find again.",
-  ];
+  try {
+    const data = await apiFetch("/api/summary", {
+      method: "POST",
+      body: {
+        date: state.selectedDate,
+        conversation: currentChat(),
+        regenerate: Boolean(isRegeneration),
+      },
+    });
+    elements.summaryEditor.value = normalizeFiveLines(data.summary || data.lines?.join("\n") || "");
+    if (!elements.summaryEditor.value) {
+      throw new Error("The summary came back empty.");
+    }
+    setAuthMessage("");
+  } catch (error) {
+    elements.summaryEditor.value = draftFallbackSummary(userTexts);
+    setAuthMessage(
+      error.message
+        ? `${error.message} I made a simple local draft without adding new facts.`
+        : "I made a simple local draft without adding new facts.",
+      true
+    );
+  } finally {
+    setSummaryDrafting(false);
+  }
+}
 
-  elements.summaryEditor.value = lines.join("\n");
+function setSummaryDrafting(isDrafting) {
+  elements.generateSummary.disabled = isDrafting;
+  elements.regenerateSummary.disabled = isDrafting;
+  elements.finishVoice.disabled = isDrafting;
+  if (isDrafting) {
+    elements.summaryEditor.value = "Drafting five honest lines...";
+  }
 }
 
 async function saveSummary() {
@@ -1164,6 +1359,36 @@ function linesToList(summary) {
       list.appendChild(item);
     });
   return list;
+}
+
+function draftFallbackSummary(userTexts) {
+  const fragments = userTexts
+    .flatMap((text) =>
+      text
+        .split(/[.!?;\n]+/)
+        .map((part) => part.trim().replace(/\s+/g, " "))
+        .filter(Boolean)
+    )
+    .slice(0, 3);
+
+  const first = fragments[0] || "I shared one small piece of today";
+  const second = fragments[1] || "There was not much extra detail yet";
+  const third = fragments[2] || "The memory can stay simple for now";
+
+  return normalizeFiveLines(
+    [
+      `I said this about today: ${trimSummaryLine(first)}.`,
+      `Another piece was: ${trimSummaryLine(second)}.`,
+      `I also want to hold: ${trimSummaryLine(third)}.`,
+      "I do not want these lines to pretend more than I shared.",
+      "Future-me can return to the real details that are here.",
+    ].join("\n")
+  );
+}
+
+function trimSummaryLine(value) {
+  const text = String(value).trim().replace(/\s+/g, " ");
+  return text.length > 140 ? `${text.slice(0, 137).trim()}...` : text;
 }
 
 function normalizeFiveLines(value) {

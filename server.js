@@ -11,6 +11,8 @@ loadLocalEnv();
 
 const port = process.env.PORT || 3000;
 const openAiApiKey = process.env.OPENAI_API_KEY || "";
+const openAiSummaryModel = process.env.OPENAI_SUMMARY_MODEL || "gpt-5.5";
+const openAiSummaryFallbackModel = process.env.OPENAI_SUMMARY_FALLBACK_MODEL || "gpt-4.1-mini";
 const openAiTtsModel = process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts";
 const openAiTtsVoice = process.env.OPENAI_TTS_VOICE || "fable";
 const openAiTtsInstructions =
@@ -150,6 +152,11 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && url.pathname === "/api/realtime-session") {
       await handleRealtimeSession(req, res);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/summary") {
+      await handleSummaryDraft(req, res);
       return;
     }
 
@@ -605,19 +612,24 @@ async function handleRealtimeSession(req, res) {
   const sdp = await readBody(req);
   const sessionConfig = JSON.stringify({
     type: "realtime",
-    model: process.env.OPENAI_REALTIME_MODEL || "gpt-realtime-2",
+    model: process.env.OPENAI_REALTIME_MODEL || "gpt-realtime",
     instructions:
-      "You are the warm, optimistic voice companion for This Day Then. This should feel like an open chat with a kind friend, not a survey. Listen for the user's pauses, respond naturally, and keep the conversation moving with one gentle question only when it helps. Speak briefly, softly, and humanly, with natural pauses and a quiet lift. Help the user notice ordinary details from today. Avoid therapy, diagnosis, pressure, and long explanations.",
+      "You are the warm, optimistic voice companion for This Day Then. This should feel like an open chat with a kind friend, not a survey. Listen for the user's pauses, respond naturally, and keep the conversation moving with one gentle question only when it helps. Speak briefly, softly, and humanly, with natural pauses and a quiet lift. Help the user notice ordinary details from today. Avoid therapy, diagnosis, pressure, and long explanations. The client enforces a five-minute session limit; when asked to wrap up, do not ask another question.",
+    output_modalities: ["audio"],
+    max_output_tokens: 220,
     audio: {
       input: {
+        noise_reduction: {
+          type: "near_field",
+        },
         transcription: {
           model: process.env.OPENAI_TRANSCRIPTION_MODEL || "gpt-4o-mini-transcribe",
         },
         turn_detection: {
-          type: "server_vad",
-          threshold: 0.5,
-          prefix_padding_ms: 300,
-          silence_duration_ms: 850,
+          type: "semantic_vad",
+          eagerness: "low",
+          create_response: true,
+          interrupt_response: false,
         },
       },
       output: {
@@ -643,6 +655,177 @@ async function handleRealtimeSession(req, res) {
     "Content-Type": response.ok ? "application/sdp" : "text/plain; charset=utf-8",
   });
   res.end(body);
+}
+
+async function handleSummaryDraft(req, res) {
+  if (!openAiApiKey) {
+    sendJson(res, 503, {
+      error: "OPENAI_API_KEY is not configured. Add a few lines manually or try again later.",
+    });
+    return;
+  }
+
+  let payload;
+  try {
+    payload = await readJson(req);
+  } catch (error) {
+    sendJson(res, error.status || 400, { error: error.message });
+    return;
+  }
+
+  const date = normalizeDate(payload.date);
+  const conversation = normalizeConversation(payload.conversation);
+  const userMessages = conversation
+    .filter((message) => message.role === "user")
+    .map((message) => message.text)
+    .filter(Boolean);
+
+  if (!date) {
+    sendJson(res, 400, { error: "A valid date is required." });
+    return;
+  }
+
+  if (!userMessages.length) {
+    sendJson(res, 400, {
+      error: "I need at least one spoken detail before I can draft five honest lines.",
+    });
+    return;
+  }
+
+  try {
+    const lines = await draftSummaryWithOpenAi({ date, userMessages });
+    sendJson(res, 200, { summary: lines.join("\n"), lines });
+  } catch (error) {
+    console.error("OpenAI summary failed.", error);
+    sendJson(res, error.status || 502, {
+      error: "Could not draft the five-line summary from OpenAI right now.",
+    });
+  }
+}
+
+async function draftSummaryWithOpenAi({ date, userMessages }) {
+  const models = uniqueNonEmpty([openAiSummaryModel, openAiSummaryFallbackModel]);
+  let lastError;
+
+  for (const model of models) {
+    try {
+      return await callOpenAiSummaryModel({ model, date, userMessages });
+    } catch (error) {
+      lastError = error;
+      if (!isRecoverableOpenAiModelError(error)) break;
+    }
+  }
+
+  throw lastError || new Error("OpenAI summary failed.");
+}
+
+async function callOpenAiSummaryModel({ model, date, userMessages }) {
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    Number(process.env.OPENAI_SUMMARY_TIMEOUT_MS || 30000)
+  );
+
+  const requestBody = {
+    model,
+    input: [
+      {
+        role: "system",
+        content: [
+          {
+            type: "input_text",
+            text:
+              "Draft a private diary memory as exactly five first-person lines. Use only the user's stated details. Do not invent people, places, activities, weather, feelings, outcomes, or lessons. If details are sparse, stay simple and honest rather than filling gaps. Keep the tone gentle and concrete. Return JSON only.",
+          },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: JSON.stringify({
+              date,
+              user_transcript: userMessages,
+              output_contract:
+                "Return exactly five diary lines based only on user_transcript.",
+            }),
+          },
+        ],
+      },
+    ],
+    max_output_tokens: 700,
+    text: {
+      verbosity: "low",
+      format: {
+        type: "json_schema",
+        name: "five_line_memory",
+        strict: true,
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            lines: {
+              type: "array",
+              minItems: 5,
+              maxItems: 5,
+              items: {
+                type: "string",
+              },
+            },
+          },
+          required: ["lines"],
+        },
+      },
+    },
+  };
+
+  if (supportsReasoningEffort(model)) {
+    requestBody.reasoning = {
+      effort: process.env.OPENAI_SUMMARY_REASONING_EFFORT || "low",
+    };
+  }
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${openAiApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    });
+
+    const body = await response.text();
+    if (!response.ok) {
+      const error = new Error(`OpenAI summary request failed with status ${response.status}.`);
+      error.status = response.status >= 500 ? 502 : response.status;
+      error.openAiStatus = response.status;
+      error.openAiBody = body;
+      throw error;
+    }
+
+    const payload = JSON.parse(body);
+    const parsed = JSON.parse(extractResponseOutputText(payload));
+    const lines = normalizeSummaryLines(parsed.lines);
+    if (lines.length !== 5) {
+      const error = new Error("OpenAI summary did not return exactly five lines.");
+      error.status = 502;
+      throw error;
+    }
+
+    return lines;
+  } catch (error) {
+    if (error.name === "AbortError") {
+      const timeoutError = new Error("OpenAI summary timed out.");
+      timeoutError.status = 504;
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function handleOpenAiTts(req, res) {
@@ -1094,6 +1277,38 @@ function normalizeConversation(value) {
           : new Date().toISOString(),
     }))
     .filter((message) => message.text);
+}
+
+function normalizeSummaryLines(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((line) => (typeof line === "string" ? line.trim().replace(/\s+/g, " ") : ""))
+    .filter(Boolean)
+    .slice(0, 5);
+}
+
+function extractResponseOutputText(payload) {
+  if (typeof payload?.output_text === "string") return payload.output_text;
+
+  const chunks = [];
+  for (const item of payload?.output || []) {
+    for (const content of item?.content || []) {
+      if (typeof content?.text === "string") chunks.push(content.text);
+    }
+  }
+  return chunks.join("").trim();
+}
+
+function supportsReasoningEffort(model) {
+  return /^gpt-5/i.test(String(model)) || /^o\d/i.test(String(model));
+}
+
+function isRecoverableOpenAiModelError(error) {
+  return [400, 404].includes(error.openAiStatus);
+}
+
+function uniqueNonEmpty(values) {
+  return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
 }
 
 function googleRedirectUri(req) {
