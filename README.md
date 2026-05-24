@@ -30,6 +30,11 @@ npm start
 
 Then open `http://127.0.0.1:3000`.
 
+To compare OpenAI Realtime voices directly, open
+`http://127.0.0.1:3000/voice-lab.html`. The lab lets you choose a Realtime
+voice, tune the personality notes, and start a live WebRTC voice test before
+changing the main diary flow.
+
 By default the app writes its database to `data/this-day-then-db.json`. To use a
 different database path, set:
 
@@ -80,12 +85,17 @@ Useful OpenAI voice knobs:
 - `OPENAI_API_KEY` - enables OpenAI voice generation
 - `VOICE_MODE=openai-realtime` - prefer live voice chat, the default when a key is configured
 - `OPENAI_REALTIME_MODEL=gpt-realtime` - model used for live voice chat
-- `OPENAI_REALTIME_VOICE=coral` - selected Realtime voice
+- `OPENAI_REALTIME_VOICE=marin` - selected Realtime voice
 - `OPENAI_SUMMARY_MODEL=gpt-5.5` - primary model for five-line summaries
 - `OPENAI_SUMMARY_FALLBACK_MODEL=gpt-4.1-mini` - fallback if the primary summary model is unavailable
 - `VOICE_MODE=openai-tts` - use Fable speech generation instead of live Realtime chat
 - `OPENAI_TTS_MODEL=gpt-4o-mini-tts` - speech generation model
 - `OPENAI_TTS_VOICE=fable` - selected voice
+
+Realtime voices are `alloy`, `ash`, `ballad`, `coral`, `echo`, `sage`,
+`shimmer`, `verse`, `marin`, and `cedar`; `marin` and `cedar` are the best
+starting points for natural quality. `fable` is available in the Text-to-Speech
+fallback, not in Realtime live chat.
 
 ## Natural local voice
 

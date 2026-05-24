@@ -18,6 +18,18 @@ const openAiTtsVoice = process.env.OPENAI_TTS_VOICE || "fable";
 const openAiTtsInstructions =
   process.env.OPENAI_TTS_INSTRUCTIONS ||
   "Voice: warm, bright, and reassuring, like an optimistic friend checking in at the end of the day. Tone: encouraging and emotionally present without sounding theatrical, salesy, or over-polished. Delivery: natural pauses, clear phrasing, gentle lift, and steady confidence. Keep it intimate, unhurried, and human.";
+const realtimeVoices = [
+  "alloy",
+  "ash",
+  "ballad",
+  "coral",
+  "echo",
+  "sage",
+  "shimmer",
+  "verse",
+  "marin",
+  "cedar",
+];
 const localTtsUrl = process.env.LOCAL_TTS_URL || "";
 const databasePath = process.env.DIARY_DB_PATH
   ? path.resolve(process.env.DIARY_DB_PATH)
@@ -140,6 +152,15 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "GET" && url.pathname === "/api/realtime-voices") {
+      sendJson(res, 200, {
+        voices: realtimeVoices,
+        recommended: ["marin", "cedar"],
+        defaultVoice: defaultRealtimeVoice(),
+      });
+      return;
+    }
+
     if (req.method === "POST" && url.pathname === "/api/openai-tts") {
       await handleOpenAiTts(req, res);
       return;
@@ -151,7 +172,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && url.pathname === "/api/realtime-session") {
-      await handleRealtimeSession(req, res);
+      await handleRealtimeSession(req, res, url);
       return;
     }
 
@@ -601,7 +622,7 @@ async function handleSaveEntry(req, res) {
   sendJson(res, 200, { entry: publicEntry(entry) });
 }
 
-async function handleRealtimeSession(req, res) {
+async function handleRealtimeSession(req, res, url) {
   if (!openAiApiKey) {
     sendJson(res, 503, {
       error: "OPENAI_API_KEY is not configured. Browser demo voice mode is still available.",
@@ -609,12 +630,21 @@ async function handleRealtimeSession(req, res) {
     return;
   }
 
+  const voice = realtimeVoiceFromUrl(url);
+  if (!voice) {
+    sendJson(res, 400, {
+      error: `Unsupported Realtime voice. Choose one of: ${realtimeVoices.join(", ")}.`,
+    });
+    return;
+  }
+
   const sdp = await readBody(req);
+  const style = realtimeStyleFromUrl(url);
+  const mode = realtimeModeFromUrl(url);
   const sessionConfig = JSON.stringify({
     type: "realtime",
     model: process.env.OPENAI_REALTIME_MODEL || "gpt-realtime",
-    instructions:
-      "You are the warm, optimistic voice companion for This Day Then. This should feel like an open chat with a kind friend, not a survey. Listen for the user's pauses, respond naturally, and keep the conversation moving with one gentle question only when it helps. Speak briefly, softly, and humanly, with natural pauses and a quiet lift. Help the user notice ordinary details from today. Avoid therapy, diagnosis, pressure, and long explanations. The client enforces a five-minute session limit; when asked to wrap up, do not ask another question.",
+    instructions: realtimeInstructions(style, mode),
     output_modalities: ["audio"],
     max_output_tokens: 220,
     audio: {
@@ -633,7 +663,7 @@ async function handleRealtimeSession(req, res) {
         },
       },
       output: {
-        voice: process.env.OPENAI_REALTIME_VOICE || "coral",
+        voice,
       },
     },
   });
@@ -655,6 +685,38 @@ async function handleRealtimeSession(req, res) {
     "Content-Type": response.ok ? "application/sdp" : "text/plain; charset=utf-8",
   });
   res.end(body);
+}
+
+function defaultRealtimeVoice() {
+  const configuredVoice = String(process.env.OPENAI_REALTIME_VOICE || "marin").toLowerCase();
+  return realtimeVoices.includes(configuredVoice) ? configuredVoice : "marin";
+}
+
+function realtimeVoiceFromUrl(url) {
+  const requestedVoice = String(url.searchParams.get("voice") || "").trim().toLowerCase();
+  if (!requestedVoice) return defaultRealtimeVoice();
+  return realtimeVoices.includes(requestedVoice) ? requestedVoice : "";
+}
+
+function realtimeStyleFromUrl(url) {
+  return String(url.searchParams.get("style") || "")
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 1200);
+}
+
+function realtimeModeFromUrl(url) {
+  return url.searchParams.get("mode") === "lab" ? "lab" : "diary";
+}
+
+function realtimeInstructions(style = "", mode = "diary") {
+  const base =
+    mode === "lab"
+      ? "You are helping test OpenAI Realtime voices in a simple voice lab. Sound like a warm, optimistic friend in a natural live conversation, not a scripted demo. Keep turns short, respond to what the tester actually says, and ask one easy question at a time. If the tester asks about the voice, describe what this voice feels good for. Use natural pauses, gentle warmth, and a light hopeful lift without sounding theatrical or salesy."
+      : "You are the warm, optimistic voice companion for This Day Then. This should feel like an open chat with a kind friend, not a survey. The client will start the call by giving you one diary question to ask; ask that question immediately, then stop and listen. After each user answer, respond briefly and ask exactly one short follow-up question that helps record a small diary of today: a concrete moment, feeling, person, place, sensory detail, or thing future-self should remember. Do not monologue. Avoid therapy, diagnosis, pressure, and long explanations. The client enforces a five-minute session limit; when asked to wrap up, do not ask another question.";
+  if (!style) return base;
+  return `${base} Extra voice/personality notes from the tester: ${style}`;
 }
 
 async function handleSummaryDraft(req, res) {

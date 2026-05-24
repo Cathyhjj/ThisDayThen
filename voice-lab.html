@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>This Day Then Voice Lab</title>
+  <link rel="stylesheet" href="voice-lab.css">
+</head>
+<body>
+  <main class="lab-shell">
+    <header class="lab-header">
+      <div>
+        <p class="eyebrow">Realtime voice lab</p>
+        <h1>Choose a voice and talk</h1>
+      </div>
+      <a class="home-link" href="/">Back to diary</a>
+    </header>
+
+    <section class="lab-grid">
+      <div class="lab-panel controls-panel">
+        <div class="field-group">
+          <label for="voiceList">Voice</label>
+          <div class="voice-list" id="voiceList" role="radiogroup" aria-label="Realtime voices"></div>
+        </div>
+
+        <div class="field-group">
+          <label for="stylePrompt">Personality</label>
+          <textarea id="stylePrompt" rows="7">Warm, lightly optimistic, unhurried, and emotionally present. Sound like a friend checking in at the end of the day. Keep replies short, conversational, and gentle.</textarea>
+        </div>
+
+        <div class="session-actions">
+          <button class="primary-action" id="startSession" type="button">Start voice chat</button>
+          <button class="secondary-action" id="stopSession" type="button" disabled>Stop</button>
+        </div>
+      </div>
+
+      <div class="lab-panel monitor-panel">
+        <div class="monitor-status" data-state="idle">
+          <span class="status-dot"></span>
+          <span id="sessionStatus">Ready</span>
+        </div>
+        <div class="transcript-feed" id="transcriptFeed" aria-live="polite"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="voice-lab.js" type="module"></script>
+</body>
+</html>

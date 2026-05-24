@@ -41,7 +41,7 @@ services:
       - key: OPENAI_REALTIME_MODEL
         value: gpt-realtime
       - key: OPENAI_REALTIME_VOICE
-        value: coral
+        value: marin
       - key: OPENAI_SUMMARY_MODEL
         value: gpt-5.5
       - key: OPENAI_SUMMARY_FALLBACK_MODEL
