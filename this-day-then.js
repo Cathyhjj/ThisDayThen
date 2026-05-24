@@ -1,9 +1,10 @@
 const THEME_KEY = "this-day-then.theme.v1";
 const GUEST_MESSAGE = "Guest mode is temporary. Entries stay only until this page is refreshed.";
 const VOICE_CHAT_LIMIT_MS = 5 * 60 * 1000;
+const REALTIME_REPLY_GRACE_MS = 1600;
 const PREFERRED_REALTIME_VOICE = "alloy";
 const VOICE_WRAP_UP_TEXT =
-  "Let's pause here. I'll turn what you shared into five honest lines now.";
+  "Let's pause here. I'll turn what you shared into honest memory lines now.";
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
@@ -37,6 +38,7 @@ const state = {
     userSpeaking: false,
     assistantSpeaking: false,
     currentInputLikelyEcho: false,
+    pendingRealtimeReplyTimer: null,
     wrapUpResponseId: "",
     questionQueue: [],
     openingQuestion: "",
@@ -53,7 +55,7 @@ const diaryQuestions = [
   "What did you keep thinking about today?",
   "If today had one scene worth saving, what would be in it?",
   "What did you do today that future-you might overlook?",
-  "What should these five lines be gentle about?",
+  "What should these memory lines be gentle about?",
 ];
 
 const demoEntries = [
@@ -451,7 +453,7 @@ function renderYearStack() {
       empty.className = "empty-state";
       empty.textContent =
         year === selectedYear
-          ? "Speak today into five lines, then this year will appear here."
+          ? "Speak today into memory lines, then this year will appear here."
           : "No memory yet for this date.";
       card.appendChild(empty);
     }
@@ -467,7 +469,7 @@ function renderArchive() {
   if (!entries.length) {
     const empty = document.createElement("p");
     empty.className = "empty-state";
-    empty.textContent = "No saved days yet. Add demo memories or save today's five lines.";
+    empty.textContent = "No saved days yet. Add demo memories or save today's memory lines.";
     elements.archiveList.appendChild(empty);
     return;
   }
@@ -537,7 +539,7 @@ function startVoiceSession() {
 async function finishVoiceSession() {
   stopVoiceSession();
   await draftSummary();
-  updateVoiceUI("idle", "Five lines are ready to shape");
+  updateVoiceUI("idle", "Memory lines are ready to shape");
   flashButton(elements.finishVoice, "Drafted");
 }
 
@@ -554,6 +556,7 @@ function stopVoiceSession() {
   state.voice.wrapUpResponseId = "";
   state.voice.openingQuestion = "";
   state.voice.questionQueue = [];
+  clearPendingRealtimeFollowUp();
   clearVoiceSessionLimit();
   state.voice.ttsController?.abort();
   state.voice.ttsController = null;
@@ -577,6 +580,7 @@ function startVoiceSessionLimit() {
   state.voice.userSpeaking = false;
   state.voice.openingQuestion = "";
   state.voice.questionQueue = shuffledQuestionQueue();
+  clearPendingRealtimeFollowUp();
   state.voice.timeLimitTimer = window.setTimeout(() => {
     requestVoiceWrapUp();
   }, VOICE_CHAT_LIMIT_MS);
@@ -599,7 +603,7 @@ function requestVoiceWrapUp() {
     updateVoiceUI(
       "listening",
       "Finish your thought",
-      "The five-minute check-in is ending. I will wait until you finish, then draft the five lines."
+      "The five-minute check-in is ending. I will wait until you finish, then draft honest lines."
     );
     return;
   }
@@ -612,6 +616,7 @@ function sendVoiceWrapUp() {
 
   state.voice.wrapUpPending = false;
   state.voice.wrappingUp = true;
+  clearPendingRealtimeFollowUp();
   clearVoiceSessionLimit();
 
   if (state.voice.mode === "openai-realtime" && state.voice.realtime) {
@@ -625,7 +630,7 @@ function sendVoiceWrapUp() {
         output_modalities: ["audio"],
         max_output_tokens: 80,
         instructions:
-          "The five-minute check-in is complete. Briefly thank the user, say you will turn what they shared into five lines, and do not ask another question.",
+          "The five-minute check-in is complete. Briefly thank the user, say you will turn only what they actually shared into honest memory lines, and do not ask another question.",
       },
     });
     window.setTimeout(() => {
@@ -650,7 +655,7 @@ async function finalizeVoiceWrapUp() {
 
   await draftSummary();
   stopVoiceSession();
-  updateVoiceUI("idle", "Five lines are ready to shape", "Review them and save when they feel true.");
+  updateVoiceUI("idle", "Memory lines are ready to shape", "Review them and save when they feel true.");
   flashButton(elements.finishVoice, "Drafted");
 }
 
@@ -1015,6 +1020,7 @@ async function startRealtimeVoiceSession() {
 
 function stopRealtimeVoiceSession() {
   const realtime = state.voice.realtime;
+  clearPendingRealtimeFollowUp();
   if (!realtime) return;
 
   realtime.dataChannel?.close();
@@ -1067,7 +1073,7 @@ function createRealtimeFollowUpEvent(nextQuestion) {
       output_modalities: ["audio"],
       max_output_tokens: 130,
       instructions:
-        `Briefly acknowledge the user's latest spoken message, then ask or say exactly this next diary prompt: "${nextQuestion}". Stop speaking after that and listen. Do not invent an answer for the user.`,
+        `Briefly respond only to details the user actually said in the latest transcript, then ask or say exactly this next diary prompt: "${nextQuestion}". If the transcript was unclear or too sparse, say you may have missed that and ask the prompt without pretending. Stop speaking after that and listen. Do not invent an answer, person, feeling, place, activity, or event for the user.`,
     },
   };
 }
@@ -1091,6 +1097,7 @@ function handleRealtimeEvent(rawEvent, transcriptDrafts) {
   }
 
   if (event.type === "input_audio_buffer.speech_started") {
+    clearPendingRealtimeFollowUp();
     state.voice.userSpeaking = true;
     state.voice.currentInputLikelyEcho = state.voice.assistantSpeaking;
     updateVoiceUI("listening", "Listening");
@@ -1103,7 +1110,7 @@ function handleRealtimeEvent(rawEvent, transcriptDrafts) {
       window.setTimeout(() => requestVoiceWrapUp(), 250);
       return;
     }
-    updateVoiceUI("thinking", "Letting that settle");
+    updateVoiceUI("thinking", "Still listening", "I will wait a moment in case you are not finished.");
     return;
   }
 
@@ -1148,7 +1155,7 @@ function handleRealtimeEvent(rawEvent, transcriptDrafts) {
       return;
     }
     pushMessage("user", transcript);
-    requestRealtimeFollowUp();
+    scheduleRealtimeFollowUp();
     return;
   }
 
@@ -1202,6 +1209,22 @@ function requestRealtimeFollowUp() {
   sendRealtimeEvent(createRealtimeFollowUpEvent(nextQuestion));
 }
 
+function scheduleRealtimeFollowUp() {
+  if (!state.voice.active || state.voice.wrappingUp || state.voice.finalizing) return;
+  clearPendingRealtimeFollowUp();
+  updateVoiceUI("thinking", "Still listening", "I will wait a moment in case you are not finished.");
+  state.voice.pendingRealtimeReplyTimer = window.setTimeout(() => {
+    state.voice.pendingRealtimeReplyTimer = null;
+    requestRealtimeFollowUp();
+  }, REALTIME_REPLY_GRACE_MS);
+}
+
+function clearPendingRealtimeFollowUp() {
+  if (!state.voice.pendingRealtimeReplyTimer) return;
+  window.clearTimeout(state.voice.pendingRealtimeReplyTimer);
+  state.voice.pendingRealtimeReplyTimer = null;
+}
+
 function shouldIgnoreRealtimeTranscript(text) {
   const normalized = normalizeTranscriptForEchoCheck(text);
   if (!normalized) return true;
@@ -1243,7 +1266,7 @@ function normalizeTranscriptForEchoCheck(text) {
 function nextPromptText() {
   const userCount = countUserMessages();
   if (userCount >= 5) {
-    return "That feels like enough for today. When you are ready, I can turn this into five lines.";
+    return "That feels like enough for today. When you are ready, I can turn this into honest memory lines.";
   }
 
   if (!state.voice.questionQueue.length) {
@@ -1312,7 +1335,7 @@ function renderReflection() {
   if (!entries.length) {
     elements.reflectionBox.hidden = false;
     elements.reflectionBox.textContent =
-      "There is not enough saved here yet. Start with one five-line memory, and this date will gather meaning over time.";
+      "There is not enough saved here yet. Start with one honest memory, and this date will gather meaning over time.";
     return;
   }
 
@@ -1329,7 +1352,7 @@ async function draftSummary(isRegeneration = false) {
 
   if (!userTexts.length) {
     elements.summaryEditor.value = "";
-    setAuthMessage("Share at least one real detail first, then I can draft five honest lines.", true);
+    setAuthMessage("Share at least one real detail first, then I can draft honest memory lines.", true);
     return;
   }
 
@@ -1344,7 +1367,7 @@ async function draftSummary(isRegeneration = false) {
         regenerate: Boolean(isRegeneration),
       },
     });
-    elements.summaryEditor.value = normalizeFiveLines(data.summary || data.lines?.join("\n") || "");
+    elements.summaryEditor.value = normalizeMemoryLines(data.summary || data.lines?.join("\n") || "");
     if (!elements.summaryEditor.value) {
       throw new Error("The summary came back empty.");
     }
@@ -1367,12 +1390,12 @@ function setSummaryDrafting(isDrafting) {
   elements.regenerateSummary.disabled = isDrafting;
   elements.finishVoice.disabled = isDrafting;
   if (isDrafting) {
-    elements.summaryEditor.value = "Drafting five honest lines...";
+    elements.summaryEditor.value = "Drafting honest memory lines...";
   }
 }
 
 async function saveSummary() {
-  const summary = normalizeFiveLines(elements.summaryEditor.value);
+  const summary = normalizeMemoryLines(elements.summaryEditor.value);
   if (!summary) return;
 
   const draftEntry = {
@@ -1515,20 +1538,10 @@ function draftFallbackSummary(userTexts) {
         .map((part) => part.trim().replace(/\s+/g, " "))
         .filter(Boolean)
     )
-    .slice(0, 3);
+    .slice(0, 5);
 
-  const first = fragments[0] || "I shared one small piece of today";
-  const second = fragments[1] || "There was not much extra detail yet";
-  const third = fragments[2] || "The memory can stay simple for now";
-
-  return normalizeFiveLines(
-    [
-      `I said this about today: ${trimSummaryLine(first)}.`,
-      `Another piece was: ${trimSummaryLine(second)}.`,
-      `I also want to hold: ${trimSummaryLine(third)}.`,
-      "I do not want these lines to pretend more than I shared.",
-      "Future-me can return to the real details that are here.",
-    ].join("\n")
+  return normalizeMemoryLines(
+    fragments.map((fragment) => `I said this about today: ${trimSummaryLine(fragment)}.`).join("\n")
   );
 }
 
@@ -1537,7 +1550,7 @@ function trimSummaryLine(value) {
   return text.length > 140 ? `${text.slice(0, 137).trim()}...` : text;
 }
 
-function normalizeFiveLines(value) {
+function normalizeMemoryLines(value) {
   return value
     .split("\n")
     .map((line) => line.trim())

@@ -656,10 +656,8 @@ async function handleRealtimeSession(req, res, url) {
           model: process.env.OPENAI_TRANSCRIPTION_MODEL || "gpt-4o-mini-transcribe",
         },
         turn_detection: {
-          type: "server_vad",
-          threshold: 0.55,
-          prefix_padding_ms: 300,
-          silence_duration_ms: 700,
+          type: "semantic_vad",
+          eagerness: "low",
           create_response: false,
           interrupt_response: false,
         },
@@ -715,8 +713,8 @@ function realtimeModeFromUrl(url) {
 function realtimeInstructions(style = "", mode = "diary") {
   const base =
     mode === "lab"
-      ? "You are helping test OpenAI Realtime voices in a simple voice lab. Sound like a warm, optimistic friend in a natural live conversation, not a scripted demo. Keep turns short, respond to what the tester actually says, and ask one easy question at a time. If the tester asks about the voice, describe what this voice feels good for. Use natural pauses, gentle warmth, and a light hopeful lift without sounding theatrical or salesy."
-      : "You are the warm, optimistic voice companion for This Day Then. This should feel like an open chat with a kind friend, not a survey. The client will start the call by giving you one diary question to ask; ask that question immediately, then stop and listen. After each user answer, respond briefly and ask exactly one short follow-up question that helps record a small diary of today: a concrete moment, feeling, person, place, sensory detail, or thing future-self should remember. Do not monologue. Avoid therapy, diagnosis, pressure, and long explanations. The client enforces a five-minute session limit; when asked to wrap up, do not ask another question.";
+      ? "You are helping test OpenAI Realtime voices in a simple voice lab. Sound like a warm, optimistic friend in a natural live conversation, not a scripted demo. Keep turns short, respond only to what the tester actually says, and ask one easy question at a time. Never invent the tester's answer, feeling, place, activity, or event. If the audio or transcript is unclear, say you may have missed that and ask them to repeat. If the tester asks about the voice, describe what this voice feels good for. Use natural pauses, gentle warmth, and a light hopeful lift without sounding theatrical or salesy."
+      : "You are the warm, optimistic voice companion for This Day Then. This should feel like an open chat with a kind friend, not a survey. The client will start the call by giving you one diary question to ask; ask that question immediately, then stop and listen. After each user answer, respond briefly using only details the user actually said, then ask exactly one short follow-up question that helps record a small diary of today: a concrete moment, feeling, person, place, sensory detail, or thing future-self should remember. Never invent the user's answer, feeling, place, activity, event, outcome, or lesson. If the audio or transcript is unclear, say you may have missed that and ask them to repeat. Do not monologue. Avoid therapy, diagnosis, pressure, and long explanations. The client enforces a five-minute session limit; when asked to wrap up, do not ask another question.";
   if (!style) return base;
   return `${base} Extra voice/personality notes from the tester: ${style}`;
 }
@@ -751,7 +749,7 @@ async function handleSummaryDraft(req, res) {
 
   if (!userMessages.length) {
     sendJson(res, 400, {
-      error: "I need at least one spoken detail before I can draft five honest lines.",
+      error: "I need at least one spoken detail before I can draft honest lines.",
     });
     return;
   }
@@ -762,7 +760,7 @@ async function handleSummaryDraft(req, res) {
   } catch (error) {
     console.error("OpenAI summary failed.", error);
     sendJson(res, error.status || 502, {
-      error: "Could not draft the five-line summary from OpenAI right now.",
+      error: "Could not draft the memory lines from OpenAI right now.",
     });
   }
 }
@@ -799,7 +797,7 @@ async function callOpenAiSummaryModel({ model, date, userMessages }) {
           {
             type: "input_text",
             text:
-              "Draft a private diary memory as exactly five first-person lines. Use only the user's stated details. Do not invent people, places, activities, weather, feelings, outcomes, or lessons. If details are sparse, stay simple and honest rather than filling gaps. Keep the tone gentle and concrete. Return JSON only.",
+              "Draft a private diary memory as one to five first-person lines. Use only the user's stated details. Do not invent people, places, activities, weather, feelings, outcomes, lessons, or connective filler. If details are sparse, return fewer lines rather than filling gaps. Keep the tone gentle and concrete. Return JSON only.",
           },
         ],
       },
@@ -812,7 +810,7 @@ async function callOpenAiSummaryModel({ model, date, userMessages }) {
               date,
               user_transcript: userMessages,
               output_contract:
-                "Return exactly five diary lines based only on user_transcript.",
+                "Return 1 to 5 diary lines based only on user_transcript. Fewer lines are preferred when the transcript has fewer real details.",
             }),
           },
         ],
@@ -823,7 +821,7 @@ async function callOpenAiSummaryModel({ model, date, userMessages }) {
       verbosity: "low",
       format: {
         type: "json_schema",
-        name: "five_line_memory",
+        name: "memory_lines",
         strict: true,
         schema: {
           type: "object",
@@ -831,7 +829,7 @@ async function callOpenAiSummaryModel({ model, date, userMessages }) {
           properties: {
             lines: {
               type: "array",
-              minItems: 5,
+              minItems: 1,
               maxItems: 5,
               items: {
                 type: "string",
@@ -873,8 +871,8 @@ async function callOpenAiSummaryModel({ model, date, userMessages }) {
     const payload = JSON.parse(body);
     const parsed = JSON.parse(extractResponseOutputText(payload));
     const lines = normalizeSummaryLines(parsed.lines);
-    if (lines.length !== 5) {
-      const error = new Error("OpenAI summary did not return exactly five lines.");
+    if (!lines.length) {
+      const error = new Error("OpenAI summary did not return any lines.");
       error.status = 502;
       throw error;
     }

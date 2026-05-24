@@ -10,6 +10,7 @@ const fallbackVoices = [
   "marin",
   "cedar",
 ];
+const REPLY_GRACE_MS = 1600;
 
 const elements = {
   voiceList: document.querySelector("#voiceList"),
@@ -35,6 +36,7 @@ const state = {
   micMonitor: null,
   assistantSpeaking: false,
   currentInputLikelyEcho: false,
+  pendingReplyTimer: null,
   live: false,
 };
 
@@ -210,6 +212,7 @@ function stopSession(message = "Stopped.", resetStatus = true) {
   state.live = false;
   state.assistantSpeaking = false;
   state.currentInputLikelyEcho = false;
+  clearScheduledFollowUp();
   state.draftNodes.clear();
   stopMicMeter();
 
@@ -237,7 +240,7 @@ function createFollowUpEvent() {
       output_modalities: ["audio"],
       max_output_tokens: 130,
       instructions:
-        "Reply briefly to the tester's latest spoken message, then ask one short natural follow-up about testing this voice. Do not answer for the tester.",
+        "Reply briefly using only what the tester actually said in the latest transcript, then ask one short natural follow-up about testing this voice. If the transcript was unclear or too sparse, say you may have missed that and ask them to try again. Do not invent an answer, feeling, place, activity, or event for the tester.",
     },
   };
 }
@@ -268,13 +271,14 @@ function handleRealtimeEvent(rawEvent) {
   }
 
   if (event.type === "input_audio_buffer.speech_started") {
+    clearScheduledFollowUp();
     state.currentInputLikelyEcho = state.assistantSpeaking;
     setStatus("live", "Listening...");
     return;
   }
 
   if (event.type === "input_audio_buffer.speech_stopped") {
-    setStatus("connecting", "Thinking...");
+    setStatus("connecting", "Waiting in case you are not finished...");
     return;
   }
 
@@ -298,7 +302,7 @@ function handleRealtimeEvent(rawEvent) {
       return;
     }
     finalizeDraft(`you:${event.item_id || "latest"}`, "You", transcript);
-    sendRealtimeEvent(createFollowUpEvent());
+    scheduleFollowUp();
     return;
   }
 
@@ -354,6 +358,22 @@ function finalizeDraft(key, role, fallbackText = "") {
   } else {
     appendFeed(role, text);
   }
+}
+
+function scheduleFollowUp() {
+  if (!state.live) return;
+  clearScheduledFollowUp();
+  setStatus("connecting", "Waiting in case you are not finished...");
+  state.pendingReplyTimer = window.setTimeout(() => {
+    state.pendingReplyTimer = null;
+    if (state.live) sendRealtimeEvent(createFollowUpEvent());
+  }, REPLY_GRACE_MS);
+}
+
+function clearScheduledFollowUp() {
+  if (!state.pendingReplyTimer) return;
+  window.clearTimeout(state.pendingReplyTimer);
+  state.pendingReplyTimer = null;
 }
 
 function appendAssistantItem(item) {
