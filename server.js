@@ -688,8 +688,8 @@ async function handleRealtimeSession(req, res, url) {
 }
 
 function defaultRealtimeVoice() {
-  const configuredVoice = String(process.env.OPENAI_REALTIME_VOICE || "marin").toLowerCase();
-  return realtimeVoices.includes(configuredVoice) ? configuredVoice : "marin";
+  const configuredVoice = String(process.env.OPENAI_REALTIME_VOICE || "alloy").toLowerCase();
+  return realtimeVoices.includes(configuredVoice) ? configuredVoice : "alloy";
 }
 
 function realtimeVoiceFromUrl(url) {

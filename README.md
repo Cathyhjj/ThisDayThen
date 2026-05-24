@@ -85,7 +85,7 @@ Useful OpenAI voice knobs:
 - `OPENAI_API_KEY` - enables OpenAI voice generation
 - `VOICE_MODE=openai-realtime` - prefer live voice chat, the default when a key is configured
 - `OPENAI_REALTIME_MODEL=gpt-realtime` - model used for live voice chat
-- `OPENAI_REALTIME_VOICE=marin` - selected Realtime voice
+- `OPENAI_REALTIME_VOICE=alloy` - selected Realtime voice
 - `OPENAI_SUMMARY_MODEL=gpt-5.5` - primary model for five-line summaries
 - `OPENAI_SUMMARY_FALLBACK_MODEL=gpt-4.1-mini` - fallback if the primary summary model is unavailable
 - `VOICE_MODE=openai-tts` - use Fable speech generation instead of live Realtime chat

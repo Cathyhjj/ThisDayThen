@@ -24,7 +24,7 @@ const elements = {
 const state = {
   voices: fallbackVoices,
   recommended: new Set(["marin", "cedar"]),
-  selectedVoice: "marin",
+  selectedVoice: "alloy",
   peerConnection: null,
   dataChannel: null,
   stream: null,
@@ -50,8 +50,8 @@ async function loadVoices() {
     const data = await response.json();
     state.voices = Array.isArray(data.voices) && data.voices.length ? data.voices : fallbackVoices;
     state.recommended = new Set(Array.isArray(data.recommended) ? data.recommended : ["marin", "cedar"]);
-    state.selectedVoice = state.voices.includes("marin")
-      ? "marin"
+    state.selectedVoice = state.voices.includes("alloy")
+      ? "alloy"
       : state.voices.includes(data.defaultVoice)
         ? data.defaultVoice
         : state.voices[0];

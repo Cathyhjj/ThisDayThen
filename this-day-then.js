@@ -1,6 +1,7 @@
 const THEME_KEY = "this-day-then.theme.v1";
 const GUEST_MESSAGE = "Guest mode is temporary. Entries stay only until this page is refreshed.";
 const VOICE_CHAT_LIMIT_MS = 5 * 60 * 1000;
+const PREFERRED_REALTIME_VOICE = "alloy";
 const VOICE_WRAP_UP_TEXT =
   "Let's pause here. I'll turn what you shared into five honest lines now.";
 
@@ -985,7 +986,7 @@ async function startRealtimeVoiceSession() {
     const offer = await peerConnection.createOffer();
     await peerConnection.setLocalDescription(offer);
 
-    const response = await fetch("/api/realtime-session", {
+    const response = await fetch(`/api/realtime-session?voice=${PREFERRED_REALTIME_VOICE}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/sdp",
