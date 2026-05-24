@@ -35,15 +35,22 @@ const state = {
     finalizing: false,
     userSpeaking: false,
     wrapUpResponseId: "",
+    questionQueue: [],
+    openingQuestion: "",
   },
 };
 
-const prompts = [
-  "I'm here. What stayed with you from today?",
-  "Was there a small moment you almost missed, but future-you might want to remember?",
-  "Who or what shaped the feeling of the day?",
-  "If this day had a color or weather, what would it be?",
-  "What should the five lines be gentle about?",
+const diaryQuestions = [
+  "What is one moment from today you want future-you to remember?",
+  "What small thing happened today that says more than it seems?",
+  "Who or what shaped the feeling of your day?",
+  "What did today feel like in your body or mood?",
+  "Was there a place, sound, smell, or tiny detail that stayed with you?",
+  "What part of today felt hard, soft, surprising, or quietly good?",
+  "What did you keep thinking about today?",
+  "If today had one scene worth saving, what would be in it?",
+  "What did you do today that future-you might overlook?",
+  "What should these five lines be gentle about?",
 ];
 
 const demoEntries = [
@@ -542,6 +549,8 @@ function stopVoiceSession() {
   state.voice.finalizing = false;
   state.voice.startedAt = 0;
   state.voice.wrapUpResponseId = "";
+  state.voice.openingQuestion = "";
+  state.voice.questionQueue = [];
   clearVoiceSessionLimit();
   state.voice.ttsController?.abort();
   state.voice.ttsController = null;
@@ -563,6 +572,8 @@ function startVoiceSessionLimit() {
   state.voice.wrappingUp = false;
   state.voice.finalizing = false;
   state.voice.userSpeaking = false;
+  state.voice.openingQuestion = "";
+  state.voice.questionQueue = shuffledQuestionQueue();
   state.voice.timeLimitTimer = window.setTimeout(() => {
     requestVoiceWrapUp();
   }, VOICE_CHAT_LIMIT_MS);
@@ -899,11 +910,7 @@ function acceptUserVoiceText(text) {
     return;
   }
 
-  const userCount = countUserMessages();
-  const nextPrompt =
-    userCount >= prompts.length
-      ? "That feels like enough for today. When you are ready, I can turn this into five lines."
-      : prompts[Math.min(userCount, prompts.length - 1)];
+  const nextPrompt = nextPromptText();
 
   updateVoiceUI("thinking", "Letting that settle");
   window.setTimeout(() => {
@@ -939,10 +946,20 @@ async function startRealtimeVoiceSession() {
     const peerConnection = new RTCPeerConnection();
     const audio = document.createElement("audio");
     audio.autoplay = true;
+    audio.hidden = true;
     audio.setAttribute("playsinline", "true");
+    document.body.appendChild(audio);
 
     peerConnection.ontrack = (event) => {
       audio.srcObject = event.streams[0];
+      audio.play().catch((error) => {
+        console.warn("Realtime audio playback was blocked.", error);
+        updateVoiceUI(
+          "listening",
+          "Voice is connected",
+          "If you do not hear her, check browser audio permissions and keep speaking naturally."
+        );
+      });
     };
 
     stream.getAudioTracks().forEach((track) => {
@@ -955,15 +972,10 @@ async function startRealtimeVoiceSession() {
     dataChannel.addEventListener("open", () => {
       state.voice.realtime = { peerConnection, dataChannel, stream, audio, transcriptDrafts };
       startVoiceSessionLimit();
+      const openingQuestion = nextPromptText();
+      state.voice.openingQuestion = openingQuestion;
       updateVoiceUI("speaking", "She is beginning softly");
-      sendRealtimeEvent({
-        type: "response.create",
-        response: {
-          output_modalities: ["audio"],
-          instructions:
-            "Begin like a close friend joining a quiet call. Say briefly: I'm here with you. What do you feel like talking about from today?",
-        },
-      });
+      sendRealtimeEvent(createRealtimeQuestionEvent(openingQuestion, "diary_opening"));
     });
 
     dataChannel.addEventListener("message", (event) => {
@@ -1015,11 +1027,49 @@ function sendRealtimeEvent(event) {
   dataChannel.send(JSON.stringify(event));
 }
 
+function createRealtimeQuestionEvent(question, purpose = "diary_question") {
+  return {
+    type: "response.create",
+    response: {
+      output_modalities: ["audio"],
+      max_output_tokens: 110,
+      metadata: {
+        response_purpose: purpose,
+      },
+      instructions:
+        `Warmly ask exactly this one diary question, then stop speaking and listen: "${question}"`,
+      input: [
+        {
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text:
+                `Start this five-minute diary check-in by asking this exact question: "${question}"`,
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
+
 function handleRealtimeEvent(rawEvent, transcriptDrafts) {
   let event;
   try {
     event = JSON.parse(rawEvent);
   } catch {
+    return;
+  }
+
+  if (event.type === "error") {
+    console.warn("Realtime event error.", event.error || event);
+    updateVoiceUI(
+      "idle",
+      "Voice had trouble starting",
+      "Tap Start voice chat again, or use the transcript input if your browser blocks audio."
+    );
     return;
   }
 
@@ -1113,7 +1163,24 @@ function pushAssistantTranscriptFromRealtimeItem(item) {
 
 function nextPromptText() {
   const userCount = countUserMessages();
-  return prompts[Math.min(userCount, prompts.length - 1)];
+  if (userCount >= 5) {
+    return "That feels like enough for today. When you are ready, I can turn this into five lines.";
+  }
+
+  if (!state.voice.questionQueue.length) {
+    state.voice.questionQueue = shuffledQuestionQueue();
+  }
+
+  return state.voice.questionQueue.shift() || diaryQuestions[0];
+}
+
+function shuffledQuestionQueue() {
+  const questions = [...diaryQuestions];
+  for (let index = questions.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [questions[index], questions[swapIndex]] = [questions[swapIndex], questions[index]];
+  }
+  return questions;
 }
 
 function updateVoiceUI(status, label, hint) {
