@@ -18,6 +18,8 @@ const elements = {
   stopSession: document.querySelector("#stopSession"),
   sessionStatus: document.querySelector("#sessionStatus"),
   monitorStatus: document.querySelector(".monitor-status"),
+  micLevel: document.querySelector("#micLevel"),
+  micStatus: document.querySelector("#micStatus"),
   transcriptFeed: document.querySelector("#transcriptFeed"),
 };
 
@@ -30,6 +32,9 @@ const state = {
   stream: null,
   audio: null,
   draftNodes: new Map(),
+  micMonitor: null,
+  assistantSpeaking: false,
+  currentInputLikelyEcho: false,
   live: false,
 };
 
@@ -115,6 +120,7 @@ async function startSession() {
         autoGainControl: true,
       },
     });
+    startMicMeter(state.stream);
 
     state.peerConnection = new RTCPeerConnection();
     state.audio = document.createElement("audio");
@@ -202,7 +208,10 @@ function stopSession(message = "Stopped.", resetStatus = true) {
   state.stream = null;
   state.audio = null;
   state.live = false;
+  state.assistantSpeaking = false;
+  state.currentInputLikelyEcho = false;
   state.draftNodes.clear();
+  stopMicMeter();
 
   setControls(false);
   if (resetStatus) setStatus("idle", "Ready");
@@ -217,6 +226,18 @@ function createOpeningEvent() {
       max_output_tokens: 120,
       instructions:
         `You are using the ${state.selectedVoice} voice. Start with one short, friendly greeting and ask what the tester wants to try with this voice.`,
+    },
+  };
+}
+
+function createFollowUpEvent() {
+  return {
+    type: "response.create",
+    response: {
+      output_modalities: ["audio"],
+      max_output_tokens: 130,
+      instructions:
+        "Reply briefly to the tester's latest spoken message, then ask one short natural follow-up about testing this voice. Do not answer for the tester.",
     },
   };
 }
@@ -247,6 +268,7 @@ function handleRealtimeEvent(rawEvent) {
   }
 
   if (event.type === "input_audio_buffer.speech_started") {
+    state.currentInputLikelyEcho = state.assistantSpeaking;
     setStatus("live", "Listening...");
     return;
   }
@@ -257,17 +279,26 @@ function handleRealtimeEvent(rawEvent) {
   }
 
   if (event.type === "response.audio.delta" || event.type === "response.output_audio.delta") {
+    state.assistantSpeaking = true;
     setStatus("live", "Speaking...");
     return;
   }
 
   if (event.type === "response.done" || event.type === "response.audio.done") {
+    state.assistantSpeaking = false;
     setStatus("live", "Listening.");
     return;
   }
 
   if (event.type === "conversation.item.input_audio_transcription.completed" && event.transcript) {
-    finalizeDraft(`you:${event.item_id || "latest"}`, "You", event.transcript.trim());
+    const transcript = event.transcript.trim();
+    if (shouldIgnoreTranscript(transcript)) {
+      appendFeed("System", "Ignored likely speaker echo. Try speaking after the AI finishes.");
+      setStatus("live", "Listening.");
+      return;
+    }
+    finalizeDraft(`you:${event.item_id || "latest"}`, "You", transcript);
+    sendRealtimeEvent(createFollowUpEvent());
     return;
   }
 
@@ -334,6 +365,40 @@ function appendAssistantItem(item) {
   if (text) appendFeed("AI", text);
 }
 
+function shouldIgnoreTranscript(text) {
+  const normalized = normalizeForEcho(text);
+  if (!normalized) return true;
+
+  const likelyEcho = state.currentInputLikelyEcho;
+  state.currentInputLikelyEcho = false;
+  if (!likelyEcho) return false;
+
+  const lastAssistant = findLastAssistantText();
+  const normalizedAssistant = normalizeForEcho(lastAssistant);
+  if (!normalizedAssistant) return false;
+  if (normalizedAssistant.includes(normalized)) return true;
+
+  const words = normalized.split(" ").filter((word) => word.length > 2);
+  if (words.length < 4) return false;
+  const assistantWords = new Set(normalizedAssistant.split(" ").filter((word) => word.length > 2));
+  const overlap = words.filter((word) => assistantWords.has(word)).length / words.length;
+  return overlap >= 0.58;
+}
+
+function findLastAssistantText() {
+  const items = [...elements.transcriptFeed.querySelectorAll(".feed-item")].reverse();
+  const assistantItem = items.find((item) => item.querySelector(".feed-role")?.textContent === "AI");
+  return assistantItem?.querySelector(".feed-text")?.textContent || "";
+}
+
+function normalizeForEcho(text) {
+  return String(text || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function appendFeed(role, text) {
   const cleanText = String(text || "").trim();
   if (!cleanText) return;
@@ -371,6 +436,63 @@ function setControls(isConnectingOrLive) {
   elements.voiceList.querySelectorAll("button").forEach((button) => {
     button.disabled = isConnectingOrLive;
   });
+}
+
+function startMicMeter(stream) {
+  stopMicMeter();
+
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) {
+      elements.micStatus.textContent = "Mic is connected. Audio meter is not supported here.";
+      return;
+    }
+
+    const audioContext = new AudioContext();
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 512;
+    const source = audioContext.createMediaStreamSource(stream);
+    source.connect(analyser);
+    const samples = new Uint8Array(analyser.fftSize);
+
+    state.micMonitor = {
+      audioContext,
+      analyser,
+      samples,
+      timer: window.setInterval(() => updateMicMeter(analyser, samples), 120),
+    };
+    elements.micStatus.textContent = "Mic permission granted. Speak and watch this bar move.";
+  } catch (error) {
+    console.warn("Mic meter could not start.", error);
+    elements.micStatus.textContent = "Mic is connected. Audio meter could not start on this browser.";
+  }
+}
+
+function updateMicMeter(analyser, samples) {
+  analyser.getByteTimeDomainData(samples);
+  let sum = 0;
+  for (const sample of samples) {
+    const centered = sample - 128;
+    sum += centered * centered;
+  }
+  const rms = Math.sqrt(sum / samples.length) / 128;
+  const percent = Math.min(100, Math.round(rms * 380));
+  elements.micLevel.style.width = `${percent}%`;
+  if (percent > 12) {
+    elements.micStatus.textContent = "Mic is hearing you.";
+  } else {
+    elements.micStatus.textContent = "Mic is open. Speak close to the phone if the bar barely moves.";
+  }
+}
+
+function stopMicMeter() {
+  if (state.micMonitor?.timer) {
+    window.clearInterval(state.micMonitor.timer);
+  }
+  state.micMonitor?.audioContext?.close().catch(() => {});
+  state.micMonitor = null;
+  elements.micLevel.style.width = "0";
+  elements.micStatus.textContent = "Mic is idle";
 }
 
 function setStatus(status, text) {

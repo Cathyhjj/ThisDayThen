@@ -33,7 +33,8 @@ Then open `http://127.0.0.1:3000`.
 To compare OpenAI Realtime voices directly, open
 `http://127.0.0.1:3000/voice-lab.html`. The lab lets you choose a Realtime
 voice, tune the personality notes, and start a live WebRTC voice test before
-changing the main diary flow.
+changing the main diary flow. It also shows a local mic meter so phone testing
+can confirm that the browser is actually receiving microphone input.
 
 By default the app writes its database to `data/this-day-then-db.json`. To use a
 different database path, set:

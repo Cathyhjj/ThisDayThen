@@ -217,6 +217,34 @@ button:disabled {
   background: #b64242;
 }
 
+.mic-check {
+  margin-top: 8px;
+}
+
+.mic-meter {
+  width: 100%;
+  height: 12px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #eef2ec;
+}
+
+.mic-meter span {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--warm));
+  transition: width 90ms linear;
+}
+
+#micStatus {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
 .transcript-feed {
   flex: 1;
   margin-top: 12px;

@@ -35,6 +35,8 @@ const state = {
     wrappingUp: false,
     finalizing: false,
     userSpeaking: false,
+    assistantSpeaking: false,
+    currentInputLikelyEcho: false,
     wrapUpResponseId: "",
     questionQueue: [],
     openingQuestion: "",
@@ -1020,6 +1022,8 @@ function stopRealtimeVoiceSession() {
   realtime.stream?.getTracks().forEach((track) => track.stop());
   realtime.audio?.remove();
   state.voice.realtime = null;
+  state.voice.assistantSpeaking = false;
+  state.voice.currentInputLikelyEcho = false;
 }
 
 function sendRealtimeEvent(event) {
@@ -1056,6 +1060,18 @@ function createRealtimeQuestionEvent(question, purpose = "diary_question") {
   };
 }
 
+function createRealtimeFollowUpEvent(nextQuestion) {
+  return {
+    type: "response.create",
+    response: {
+      output_modalities: ["audio"],
+      max_output_tokens: 130,
+      instructions:
+        `Briefly acknowledge the user's latest spoken message, then ask or say exactly this next diary prompt: "${nextQuestion}". Stop speaking after that and listen. Do not invent an answer for the user.`,
+    },
+  };
+}
+
 function handleRealtimeEvent(rawEvent, transcriptDrafts) {
   let event;
   try {
@@ -1076,6 +1092,7 @@ function handleRealtimeEvent(rawEvent, transcriptDrafts) {
 
   if (event.type === "input_audio_buffer.speech_started") {
     state.voice.userSpeaking = true;
+    state.voice.currentInputLikelyEcho = state.voice.assistantSpeaking;
     updateVoiceUI("listening", "Listening");
     return;
   }
@@ -1091,6 +1108,9 @@ function handleRealtimeEvent(rawEvent, transcriptDrafts) {
   }
 
   if (event.type === "response.created") {
+    if (!state.voice.wrappingUp) {
+      state.voice.assistantSpeaking = true;
+    }
     if (state.voice.wrappingUp && state.voice.wrapUpResponseId === "pending") {
       state.voice.wrapUpResponseId = event.response?.id || "";
     }
@@ -1098,11 +1118,13 @@ function handleRealtimeEvent(rawEvent, transcriptDrafts) {
   }
 
   if (event.type === "response.audio.delta" || event.type === "response.output_audio.delta") {
+    state.voice.assistantSpeaking = true;
     updateVoiceUI("speaking", "She is speaking");
     return;
   }
 
   if (event.type === "response.done" || event.type === "response.audio.done") {
+    state.voice.assistantSpeaking = false;
     if (state.voice.wrappingUp && isWrapUpRealtimeResponseDone(event)) {
       window.setTimeout(() => finalizeVoiceWrapUp(), 900);
       return;
@@ -1119,8 +1141,14 @@ function handleRealtimeEvent(rawEvent, transcriptDrafts) {
 
   if (event.type === "conversation.item.input_audio_transcription.completed" && event.transcript) {
     const key = `user:${event.item_id || "latest"}`;
+    const transcript = event.transcript.trim();
     transcriptDrafts.delete(key);
-    pushMessage("user", event.transcript.trim());
+    if (shouldIgnoreRealtimeTranscript(transcript)) {
+      updateVoiceUI("listening", "Listening", "I ignored speaker echo. Speak after she finishes, and I will wait for you.");
+      return;
+    }
+    pushMessage("user", transcript);
+    requestRealtimeFollowUp();
     return;
   }
 
@@ -1160,6 +1188,56 @@ function pushAssistantTranscriptFromRealtimeItem(item) {
   if (text && !(lastMessage?.role === "bot" && lastMessage.text === text)) {
     pushMessage("bot", text);
   }
+}
+
+function requestRealtimeFollowUp() {
+  if (!state.voice.active || state.voice.wrappingUp || state.voice.finalizing) return;
+  if (state.voice.wrapUpPending || state.voice.timeLimitReached) {
+    requestVoiceWrapUp();
+    return;
+  }
+
+  const nextQuestion = nextPromptText();
+  updateVoiceUI("speaking", "She is answering");
+  sendRealtimeEvent(createRealtimeFollowUpEvent(nextQuestion));
+}
+
+function shouldIgnoreRealtimeTranscript(text) {
+  const normalized = normalizeTranscriptForEchoCheck(text);
+  if (!normalized) return true;
+
+  const likelyEcho = state.voice.currentInputLikelyEcho;
+  state.voice.currentInputLikelyEcho = false;
+  if (!likelyEcho) return false;
+
+  return resemblesRecentAssistantText(normalized);
+}
+
+function resemblesRecentAssistantText(normalizedTranscript) {
+  const recentAssistantText =
+    [...currentChat()].reverse().find((message) => message.role === "bot")?.text ||
+    state.voice.openingQuestion ||
+    "";
+  const normalizedAssistant = normalizeTranscriptForEchoCheck(recentAssistantText);
+  if (!normalizedAssistant) return false;
+  if (normalizedAssistant.includes(normalizedTranscript)) return true;
+
+  const transcriptWords = normalizedTranscript.split(" ").filter((word) => word.length > 2);
+  if (transcriptWords.length < 4) return false;
+
+  const assistantWords = new Set(
+    normalizedAssistant.split(" ").filter((word) => word.length > 2)
+  );
+  const overlapCount = transcriptWords.filter((word) => assistantWords.has(word)).length;
+  return overlapCount / transcriptWords.length >= 0.58;
+}
+
+function normalizeTranscriptForEchoCheck(text) {
+  return String(text || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function nextPromptText() {
