@@ -6,48 +6,96 @@
     <title>This Day Then</title>
     <meta
       name="description"
-      content="A calm journal where a warm AI friend helps you remember this date across years."
+      content="A private memory practice for noticing today and revisiting this date across the years."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap"
       rel="stylesheet"
     />
+    <link rel="stylesheet" href="assets/phosphor/style.css" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <canvas id="breathCanvas" class="breath-canvas" aria-hidden="true"></canvas>
+
     <main class="app-shell">
       <header class="topbar" aria-label="App header">
-        <div class="topbar-copy">
-          <p class="eyebrow">This Day Then</p>
-          <h1>This day, then</h1>
-        </div>
-        <div class="account-strip" aria-live="polite">
+        <a class="brand" href="#checkinView" aria-label="This Day Then, today">
+          This Day Then
+        </a>
+
+        <nav class="tabs" aria-label="Main views" role="tablist">
           <button
-            class="account-button"
-            id="authToggle"
+            class="tab is-active"
+            data-view="checkin"
             type="button"
-            aria-label="Open account menu"
-            aria-controls="authPanel"
-            aria-expanded="false"
+            role="tab"
+            aria-controls="checkinView"
+            aria-selected="true"
           >
-            <span class="account-mark" aria-hidden="true"></span>
-            <span class="account-name" id="accountName">Guest</span>
+            Today
+          </button>
+          <button
+            class="tab"
+            data-view="timeline"
+            type="button"
+            role="tab"
+            aria-controls="timelineView"
+            aria-selected="false"
+          >
+            Through time
+          </button>
+          <button
+            class="tab"
+            data-view="archive"
+            type="button"
+            role="tab"
+            aria-controls="archiveView"
+            aria-selected="false"
+          >
+            Archive
+          </button>
+        </nav>
+
+        <div class="topbar-actions">
+          <div class="account-strip" aria-live="polite">
+            <button
+              class="icon-button account-button"
+              id="authToggle"
+              type="button"
+              aria-label="Open account menu"
+              aria-controls="authPanel"
+              aria-expanded="false"
+              title="Account"
+            >
+              <i class="ph ph-user-circle" aria-hidden="true"></i>
+              <span class="account-name" id="accountName">Guest</span>
+            </button>
+          </div>
+          <span class="topbar-divider" aria-hidden="true"></span>
+          <button
+            class="icon-button"
+            id="themeToggle"
+            type="button"
+            aria-label="Toggle deep forest mode"
+            title="Theme"
+          >
+            <i class="ph ph-sun" aria-hidden="true"></i>
           </button>
         </div>
-        <button class="icon-button" id="themeToggle" aria-label="Toggle deep forest mode" title="Theme">
-          <span class="theme-mark" aria-hidden="true"></span>
-        </button>
       </header>
 
       <section class="auth-panel" id="authPanel" aria-labelledby="auth-title" hidden>
-        <div class="panel-heading">
+        <div class="panel-heading auth-panel-heading">
           <div>
-            <p class="section-kicker">Private diary</p>
+            <p class="section-kicker">Private by default</p>
             <h2 id="auth-title">Sign in to keep your days</h2>
           </div>
+          <button class="icon-button auth-close" id="authClose" type="button" aria-label="Close account panel">
+            <i class="ph ph-x" aria-hidden="true"></i>
+          </button>
         </div>
 
         <div class="auth-session">
@@ -139,100 +187,129 @@
       </section>
 
       <div class="app-content" id="appContent">
-        <section class="date-band" aria-labelledby="date-heading">
-          <div>
-            <p class="section-kicker">Selected date</p>
-            <h2 id="date-heading">Today</h2>
-          </div>
-          <label class="date-picker">
-            <span>Date</span>
-            <input id="dateInput" type="date" />
-          </label>
-        </section>
-
-        <nav class="tabs" aria-label="Main views">
-          <button class="tab is-active" data-view="checkin">Check-in</button>
-          <button class="tab" data-view="timeline">Five years</button>
-          <button class="tab" data-view="archive">Archive</button>
-        </nav>
-
         <section class="view is-visible" id="checkinView" aria-labelledby="checkin-title">
-          <div class="conversation-panel audio-panel">
-            <div class="panel-heading">
-              <div>
-                <p class="section-kicker">Live voice</p>
-                <h2 id="checkin-title">A quiet conversation</h2>
-              </div>
-              <button class="text-button" id="resetChat">Begin again</button>
+          <aside class="date-band" aria-labelledby="date-heading">
+            <h2 class="sr-only" id="date-heading">Today</h2>
+            <div class="date-display" aria-hidden="true">
+              <span class="date-number" id="dateNumber">12</span>
+              <span class="date-month" id="dateMonth">July</span>
+              <span class="date-rule"></span>
+              <span class="date-meta" id="dateMeta">Sunday · 2026</span>
+            </div>
+
+            <label class="date-picker" title="Change date">
+              <i class="ph ph-calendar-blank" aria-hidden="true"></i>
+              <span>Change date</span>
+              <input id="dateInput" type="date" />
+            </label>
+
+            <div class="date-year-spine" id="dateYearSpine" aria-label="Same date across five years"></div>
+            <img
+              class="grove-art"
+              src="assets/zen-garden-water.png"
+              alt="Moss-covered stone and a quiet branch reflected in still water"
+            />
+            <img
+              class="mobile-grove-art"
+              src="assets/mobile-date-inkwash-v2.png"
+              alt=""
+              aria-hidden="true"
+            />
+          </aside>
+
+          <section class="conversation-panel audio-panel">
+            <div class="voice-copy">
+              <p class="voice-state section-kicker" id="voiceState">Ready when you are</p>
+              <h1 id="checkin-title">What from today would you like to carry forward?</h1>
             </div>
 
             <div class="voice-stage" data-voice-state="idle">
+              <img class="listening-art" src="assets/listening-ring.png" alt="" aria-hidden="true" />
               <button class="voice-orb" id="voiceOrb" type="button" aria-label="Start live voice chat">
-                <span class="orb-ring ring-one"></span>
-                <span class="orb-ring ring-two"></span>
-                <span class="orb-ring ring-three"></span>
-                <span class="orb-core">
-                  <span class="orb-symbol" aria-hidden="true"></span>
-                </span>
+                <i class="ph ph-microphone" aria-hidden="true"></i>
               </button>
-              <div class="voice-status">
-                <p class="voice-state" id="voiceState">Ready when you are</p>
-                <p class="voice-hint" id="voiceHint">Tap once to open a live voice chat. After that, just talk naturally.</p>
-              </div>
+              <span class="voice-timer" aria-hidden="true">0:00</span>
             </div>
 
             <div class="voice-controls">
-              <button class="primary-button" id="startVoice" type="button">Start voice chat</button>
-              <button class="secondary-button" id="finishVoice" type="button">Finish and draft</button>
+              <button class="primary-button" id="startVoice" type="button">Begin today’s conversation</button>
+              <button class="text-button finish-voice" id="finishVoice" type="button">
+                Finish &amp; shape memory
+              </button>
             </div>
 
+            <p class="voice-hint" id="voiceHint">
+              Speak naturally for a few minutes. AI will draft 1–5 honest memory lines.
+            </p>
+
             <div class="sound-bars" id="soundBars" aria-hidden="true">
-              <span></span>
-              <span></span>
-              <span></span>
-              <span></span>
-              <span></span>
-              <span></span>
-              <span></span>
+              <i class="ph ph-waveform"></i>
             </div>
+
+            <details class="type-fallback">
+              <summary><i class="ph ph-keyboard" aria-hidden="true"></i> Type instead</summary>
+              <form class="composer" id="composer">
+                <label for="messageInput">Add a detail from today</label>
+                <textarea id="messageInput" rows="3" placeholder="A small moment, in your own words..."></textarea>
+                <button class="secondary-button compact" type="submit">Add to conversation</button>
+              </form>
+            </details>
 
             <div class="transcript-pocket">
               <button class="text-button" id="toggleTranscript" type="button">Show quiet transcript</button>
+              <button class="text-button" id="resetChat" type="button">Begin again</button>
               <div class="messages" id="messages" aria-live="polite" hidden></div>
             </div>
+          </section>
 
-            <form class="composer sr-only" id="composer">
-              <label for="messageInput">Reply to your daily friend</label>
-              <textarea id="messageInput" rows="3"></textarea>
-              <button type="submit">Send</button>
-            </form>
-          </div>
-
-          <div class="summary-panel">
-            <div class="panel-heading">
+          <section class="summary-panel" aria-labelledby="memory-title">
+            <div class="summary-heading">
               <div>
-                <p class="section-kicker">Memory lines</p>
-                <h2>Today's memory</h2>
+                <p class="section-kicker">Today’s memory</p>
+                <h2 id="memory-title">Draft from your voice</h2>
               </div>
-              <button class="text-button" id="generateSummary">Draft</button>
+              <button class="text-button" id="generateSummary" type="button">Draft from voice</button>
             </div>
-            <textarea id="summaryEditor" class="summary-editor" rows="8" placeholder="Your memory can be fewer than five lines."></textarea>
+
+            <ol class="summary-preview" id="summaryPreview" aria-label="Memory line preview"></ol>
+
+            <textarea
+              id="summaryEditor"
+              class="summary-editor"
+              rows="9"
+              placeholder="I felt a quiet pride watching my daughter solve something on her own today.&#10;&#10;I took a slow morning walk and noticed how good it felt to be present.&#10;&#10;I’m learning that rest isn’t falling behind—it’s how I keep showing up."
+            ></textarea>
+
             <div class="summary-actions">
-              <button class="secondary-button" id="regenerateSummary" type="button">Regenerate</button>
-              <button class="primary-button" id="saveSummary" type="button">Save memory</button>
+              <button class="text-button" id="editSummary" type="button">Edit draft</button>
+              <button class="text-button" id="regenerateSummary" type="button">Regenerate</button>
+              <span class="action-divider" aria-hidden="true"></span>
+              <button class="save-button" id="saveSummary" type="button">
+                Save memory <i class="ph ph-arrow-right" aria-hidden="true"></i>
+              </button>
             </div>
-          </div>
+
+            <p class="privacy-note">
+              <i class="ph ph-lock-simple" aria-hidden="true"></i>
+              Private by default. Yours across the years.
+            </p>
+          </section>
+
+          <section class="checkin-year-rail" id="checkinYearRail" aria-label="This date through time"></section>
         </section>
 
-        <section class="view" id="timelineView" aria-labelledby="timeline-title">
+        <section class="view secondary-view" id="timelineView" aria-labelledby="timeline-title">
           <div class="timeline-heading">
             <div>
               <p class="section-kicker">Same date</p>
               <h2 id="timeline-title">Five years together</h2>
+              <p>One date, held gently across time.</p>
             </div>
             <div class="heading-actions">
-              <button class="secondary-button compact" id="timelineSeedDemoData">Sample years</button>
-              <button class="primary-button compact" id="compareYears">Reflect</button>
+              <button class="secondary-button compact" id="timelineSeedDemoData" type="button">
+                Sample years
+              </button>
+              <button class="primary-button compact" id="compareYears" type="button">Reflect</button>
             </div>
           </div>
 
@@ -240,22 +317,22 @@
           <aside class="reflection" id="reflectionBox" hidden></aside>
         </section>
 
-        <section class="view" id="archiveView" aria-labelledby="archive-title">
+        <section class="view secondary-view" id="archiveView" aria-labelledby="archive-title">
           <div class="timeline-heading">
             <div>
               <p class="section-kicker">Archive</p>
               <h2 id="archive-title">Saved days</h2>
+              <p>Your private collection of ordinary, meaningful moments.</p>
             </div>
-            <button class="secondary-button compact" id="seedDemoData">Add demo memories</button>
+            <button class="secondary-button compact" id="seedDemoData" type="button">Add demo memories</button>
           </div>
           <div class="archive-list" id="archiveList"></div>
         </section>
       </div>
 
       <footer class="developer-footer">
-        <span>Developed by Juanjuan Huang</span>
-        <a href="https://juanjuanhuang-cathy.github.io">juanjuanhuang-cathy.github.io</a>
-        <span>Deployed May 16, 2026</span>
+        <span>This Day Then · Private memory practice</span>
+        <a href="https://juanjuanhuang-cathy.github.io">Made by Juanjuan Huang</a>
       </footer>
     </main>
 

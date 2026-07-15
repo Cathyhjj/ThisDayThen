@@ -85,6 +85,7 @@ const demoEntries = [
 const elements = {
   breathCanvas: document.querySelector("#breathCanvas"),
   authPanel: document.querySelector("#authPanel"),
+  authClose: document.querySelector("#authClose"),
   authTitle: document.querySelector("#auth-title"),
   appContent: document.querySelector("#appContent"),
   authToggle: document.querySelector("#authToggle"),
@@ -100,10 +101,17 @@ const elements = {
   authMessage: document.querySelector("#authMessage"),
   dateInput: document.querySelector("#dateInput"),
   dateHeading: document.querySelector("#date-heading"),
+  dateNumber: document.querySelector("#dateNumber"),
+  dateMonth: document.querySelector("#dateMonth"),
+  dateMeta: document.querySelector("#dateMeta"),
+  dateYearSpine: document.querySelector("#dateYearSpine"),
+  checkinYearRail: document.querySelector("#checkinYearRail"),
   messages: document.querySelector("#messages"),
   composer: document.querySelector("#composer"),
   messageInput: document.querySelector("#messageInput"),
   summaryEditor: document.querySelector("#summaryEditor"),
+  summaryPreview: document.querySelector("#summaryPreview"),
+  editSummary: document.querySelector("#editSummary"),
   generateSummary: document.querySelector("#generateSummary"),
   regenerateSummary: document.querySelector("#regenerateSummary"),
   saveSummary: document.querySelector("#saveSummary"),
@@ -131,6 +139,7 @@ function init() {
   if (savedTheme === "night") {
     document.documentElement.dataset.theme = "night";
   }
+  syncThemeIcon();
 
   bindEvents();
   startBreathCanvas();
@@ -140,6 +149,7 @@ function init() {
 
 function bindEvents() {
   elements.authToggle.addEventListener("click", toggleAuthPanel);
+  elements.authClose.addEventListener("click", () => setAuthPanelOpen(false));
   elements.loginForm.addEventListener("submit", (event) => handleAuthSubmit(event, "login"));
   elements.registerForm.addEventListener("submit", (event) => handleAuthSubmit(event, "register"));
   elements.verifyForm.addEventListener("submit", handleRegistrationVerify);
@@ -177,6 +187,8 @@ function bindEvents() {
   elements.finishVoice.addEventListener("click", finishVoiceSession);
   elements.toggleTranscript.addEventListener("click", toggleTranscript);
   elements.generateSummary.addEventListener("click", () => draftSummary());
+  elements.editSummary.addEventListener("click", toggleSummaryEditing);
+  elements.summaryEditor.addEventListener("input", renderSummaryPreview);
   elements.regenerateSummary.addEventListener("click", () => draftSummary(true));
   elements.saveSummary.addEventListener("click", saveSummary);
   elements.resetChat.addEventListener("click", resetChat);
@@ -391,7 +403,9 @@ function readAuthRedirectMessage() {
 
 function switchView(viewName) {
   document.querySelectorAll(".tab").forEach((tab) => {
-    tab.classList.toggle("is-active", tab.dataset.view === viewName);
+    const isActive = tab.dataset.view === viewName;
+    tab.classList.toggle("is-active", isActive);
+    tab.setAttribute("aria-selected", String(isActive));
   });
 
   document.querySelectorAll(".view").forEach((view) => {
@@ -405,13 +419,110 @@ function switchView(viewName) {
 function render() {
   elements.dateInput.value = state.selectedDate;
   elements.dateHeading.textContent = formatLongDate(state.selectedDate);
+  renderSelectedDate();
   const entry = state.entries[state.selectedDate];
   elements.summaryEditor.value = entry?.summary || "";
+  renderSummaryPreview();
   elements.reflectionBox.hidden = true;
   renderMessages();
   renderYearStack();
+  renderCheckinYearRail();
   renderArchive();
   updateVoiceUI("idle");
+}
+
+function renderSelectedDate() {
+  const selected = parseLocalDate(state.selectedDate);
+  const selectedYear = selected.getFullYear();
+  const years = Array.from({ length: 5 }, (_, index) => selectedYear - index);
+
+  elements.dateNumber.textContent = String(selected.getDate()).padStart(2, "0");
+  elements.dateMonth.textContent = selected.toLocaleDateString("en-US", { month: "long" });
+  elements.dateMeta.textContent = `${selected.toLocaleDateString("en-US", {
+    weekday: "long",
+  })} · ${selectedYear}`;
+
+  elements.dateYearSpine.innerHTML = "";
+  years.forEach((year, index) => {
+    const item = document.createElement("div");
+    item.className = `date-year ${index === 0 ? "current" : ""}`;
+
+    const marker = document.createElement("span");
+    marker.className = "date-year-marker";
+    marker.setAttribute("aria-hidden", "true");
+
+    const label = document.createElement("span");
+    label.textContent = year;
+    item.append(marker, label);
+    elements.dateYearSpine.appendChild(item);
+  });
+}
+
+function renderCheckinYearRail() {
+  const selected = parseLocalDate(state.selectedDate);
+  const month = selected.getMonth();
+  const day = selected.getDate();
+  const selectedYear = selected.getFullYear();
+  const years = Array.from({ length: 5 }, (_, index) => selectedYear - index);
+
+  elements.checkinYearRail.innerHTML = "";
+  years.forEach((year, index) => {
+    const date = toDateInputValue(new Date(year, month, day));
+    const entry = state.entries[date];
+    const item = document.createElement("article");
+    item.className = `checkin-year ${index === 0 ? "current" : ""}`;
+
+    const heading = document.createElement("div");
+    heading.className = "checkin-year-heading";
+    const yearLabel = document.createElement("strong");
+    yearLabel.textContent = year;
+    const context = document.createElement("em");
+    context.textContent = index === 0 ? "Today" : "Same date";
+    heading.append(yearLabel, context);
+
+    const detail = document.createElement("div");
+    detail.className = "checkin-year-detail";
+    const icon = document.createElement("i");
+    icon.className = entry || index === 0 ? "ph ph-waveform" : "ph ph-lock-simple";
+    icon.setAttribute("aria-hidden", "true");
+    const copy = document.createElement("p");
+    copy.textContent = entry
+      ? entry.summary.split("\n").find(Boolean) || "A memory is saved here."
+      : index === 0
+        ? "Ready for today’s memory."
+        : `No memory yet · ${selected.toLocaleDateString("en-US", { month: "short" })} ${day}, ${year}`;
+    detail.append(icon, copy);
+    item.append(heading, detail);
+    elements.checkinYearRail.appendChild(item);
+  });
+}
+
+function renderSummaryPreview() {
+  const fallbackLines = [
+    "I felt a quiet pride watching my daughter solve something on her own today.",
+    "I took a slow morning walk and noticed how good it felt to be present.",
+    "I’m learning that rest isn’t falling behind—it’s how I keep showing up.",
+  ];
+  const savedLines = elements.summaryEditor.value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 5);
+  const lines = savedLines.length ? savedLines : fallbackLines;
+
+  elements.summaryPreview.innerHTML = "";
+  lines.forEach((line) => {
+    const item = document.createElement("li");
+    item.textContent = line;
+    elements.summaryPreview.appendChild(item);
+  });
+}
+
+function toggleSummaryEditing() {
+  const panel = elements.summaryEditor.closest(".summary-panel");
+  const isEditing = panel.classList.toggle("is-editing");
+  elements.editSummary.textContent = isEditing ? "Done editing" : "Edit draft";
+  if (isEditing) elements.summaryEditor.focus();
 }
 
 function renderMessages() {
@@ -1299,7 +1410,9 @@ function updateVoiceUI(status, label, hint) {
     (status === "idle"
       ? idleVoiceHint()
       : activeVoiceHint());
-  elements.startVoice.textContent = state.voice.active ? "Voice chat is open" : "Start voice chat";
+  elements.startVoice.textContent = state.voice.active
+    ? "Voice conversation is open"
+    : "Begin today’s conversation";
 }
 
 function idleVoiceHint() {
@@ -1312,7 +1425,7 @@ function idleVoiceHint() {
   if (state.voice.mode === "openai-realtime") {
     return "Tap once to open a live voice chat. After that, just talk naturally.";
   }
-  return "Tap the orb and speak naturally. She will listen, pause, and ask the next gentle question.";
+  return "Speak naturally for a few minutes. AI will draft 1–5 honest memory lines.";
 }
 
 function activeVoiceHint() {
@@ -1352,6 +1465,7 @@ async function draftSummary(isRegeneration = false) {
 
   if (!userTexts.length) {
     elements.summaryEditor.value = "";
+    renderSummaryPreview();
     setAuthMessage("Share at least one real detail first, then I can draft honest memory lines.", true);
     return;
   }
@@ -1382,6 +1496,7 @@ async function draftSummary(isRegeneration = false) {
     );
   } finally {
     setSummaryDrafting(false);
+    renderSummaryPreview();
   }
 }
 
@@ -1408,7 +1523,9 @@ async function saveSummary() {
   if (!state.auth.user) {
     const savedEntry = saveEntryInMemory(draftEntry);
     elements.summaryEditor.value = savedEntry.summary;
+    renderSummaryPreview();
     renderYearStack();
+    renderCheckinYearRail();
     renderArchive();
     setAuthMessage("Saved temporarily for this page session. Sign in to keep it.");
     flashButton(elements.saveSummary, "Saved");
@@ -1422,7 +1539,9 @@ async function saveSummary() {
     state.entries[savedEntry.date] = savedEntry;
     state.chat[savedEntry.date] = savedEntry.conversation || [];
     elements.summaryEditor.value = savedEntry.summary;
+    renderSummaryPreview();
     renderYearStack();
+    renderCheckinYearRail();
     renderArchive();
     flashButton(elements.saveSummary, "Saved");
   } catch (error) {
@@ -1439,6 +1558,7 @@ function resetChat() {
   persistChat();
   renderMessages();
   elements.summaryEditor.value = "";
+  renderSummaryPreview();
   updateVoiceUI("idle", "Ready when you are");
 }
 
@@ -1487,6 +1607,14 @@ function toggleTheme() {
   const isNight = document.documentElement.dataset.theme === "night";
   document.documentElement.dataset.theme = isNight ? "" : "night";
   localStorage.setItem(THEME_KEY, isNight ? "day" : "night");
+  syncThemeIcon();
+}
+
+function syncThemeIcon() {
+  const icon = elements.themeToggle?.querySelector("i");
+  if (!icon) return;
+  const isNight = document.documentElement.dataset.theme === "night";
+  icon.className = isNight ? "ph ph-moon" : "ph ph-sun";
 }
 
 function ensureChatForDate() {
