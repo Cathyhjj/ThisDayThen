@@ -1,17 +1,14 @@
-databases:
-  - name: this-day-then-db
-    plan: free
-    databaseName: this_day_then
-    user: this_day_then
-    region: oregon
-
 services:
   - type: web
-    name: this-day-then-voice
+    name: this-day-then
     runtime: node
-    plan: free
-    buildCommand: npm install
+    plan: starter
+    region: ohio
+    repo: https://github.com/Cathyhjj/ThisDayThen
+    branch: codex/chic-redesign
+    buildCommand: npm ci
     startCommand: npm start
+    healthCheckPath: /
     autoDeployTrigger: commit
     envVars:
       - key: GOOGLE_CLIENT_ID
@@ -23,9 +20,7 @@ services:
       - key: CANONICAL_HOST
         value: thisdaythen.com
       - key: DATABASE_URL
-        fromDatabase:
-          name: this-day-then-db
-          property: connectionString
+        sync: false
       - key: RESEND_API_KEY
         sync: false
       - key: EMAIL_FROM
@@ -46,6 +41,3 @@ services:
         value: gpt-5.5
       - key: OPENAI_SUMMARY_FALLBACK_MODEL
         value: gpt-4.1-mini
-    domains:
-      - thisdaythen.com
-      - www.thisdaythen.com
